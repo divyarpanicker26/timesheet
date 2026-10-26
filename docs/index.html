@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NYCHA Time Sheet</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #e7edf5; color: #1a1a1a; font-family: "Segoe UI", Calibri, sans-serif; }
+  a { color: #1a4f8b; }
+  .nav { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 12px 24px; background: #17375e; color: white; }
+  .nav button { color: white; background: transparent; border: 1px solid rgba(255,255,255,.45); border-radius: 6px; padding: 6px 10px; cursor: pointer; font: inherit; }
+  .nav .links { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  label.choice { display: inline-flex; align-items: center; gap: 6px; margin: 8px 16px 8px 0; font-weight: 500; }
+  .panel { background: white; border-radius: 10px; padding: 20px 22px; margin: 16px 0 24px; }
+  .panel h2 { margin: 0 0 4px; font-size: 20px; }
+  main { max-width: 1100px; margin: 24px auto 48px; padding: 0 16px; }
+  .card, .paper { background: white; border-radius: 10px; box-shadow: 0 8px 24px rgba(23, 55, 94, .08); }
+  .card { padding: 28px; max-width: 520px; margin: 8vh auto; }
+  h1 { margin: 0 0 8px; font-size: 28px; }
+  .muted { color: #526074; }
+  label { display: block; font-weight: 650; margin: 14px 0 6px; }
+  input[type="text"], input[type="password"], input[type="date"], textarea {
+    width: 100%; border: 1px solid #b7c3d3; border-radius: 6px; padding: 8px 10px; font: inherit; background: white; color: #1a1a1a;
+  }
+  textarea { min-height: 64px; resize: vertical; }
+  button.primary, a.button {
+    display: inline-block; margin-top: 16px; background: #17375e; color: white; border: 0; border-radius: 6px;
+    padding: 10px 14px; font: inherit; cursor: pointer; text-decoration: none;
+  }
+  button.secondary { background: white; color: #17375e; border: 1px solid #17375e; border-radius: 6px; padding: 10px 14px; font: inherit; cursor: pointer; }
+  button.warn { background: #9b1c1c; color: white; border: 0; border-radius: 6px; padding: 10px 14px; font: inherit; cursor: pointer; }
+  .error { background: #fde8e8; color: #9b1c1c; border-radius: 6px; padding: 10px 12px; margin: 12px 0; }
+  .ok { background: #e5f4ea; color: #146c2e; border-radius: 6px; padding: 10px 12px; }
+  .warnbox { background: #fff6e8; color: #8a4b08; border-radius: 6px; padding: 10px 12px; }
+  table.list { width: 100%; border-collapse: collapse; background: white; border-radius: 10px; overflow: hidden; }
+  table.list th, table.list td { padding: 12px; text-align: left; border-bottom: 1px solid #e1e7ef; vertical-align: top; }
+  table.list th { background: #eef3fb; }
+  .badge { font-weight: 700; }
+  .badge.submitted { color: #1a4f8b; }
+  .badge.approved { color: #146c2e; }
+  .badge.returned { color: #9b1c1c; }
+  .paper { padding: 28px 32px 36px; font-family: "Times New Roman", Times, serif; }
+  .paper h1, .paper h2 { text-align: center; margin: 0; letter-spacing: .02em; }
+  .paper h1 { font-size: 22px; }
+  .paper h2 { font-size: 18px; margin-bottom: 8px; }
+  .date-row { text-align: right; margin: 8px 0 12px; }
+  .meta { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+  .meta td { border: none; padding: 4px 0; }
+  .grid { width: 100%; border-collapse: collapse; }
+  .grid > tbody > tr > td { width: 50%; vertical-align: top; padding: 0; }
+  table.week { width: 100%; border-collapse: collapse; }
+  table.week th, table.week td { border: 1px solid #222; padding: 3px 5px; font-size: 13px; background: white; }
+  table.week th { background: #d9e2f3; text-align: center; }
+  td.shade { background: #eef3fb; }
+  table.week input { border: 0; padding: 2px; font-family: inherit; font-size: 13px; width: 100%; background: transparent; }
+  .reason { border: 1px solid #222; border-top: none; background: #eef3fb; padding: 8px; }
+  .sign { width: 100%; margin-top: 14px; }
+  .sign td { padding: 7px 8px 7px 0; vertical-align: bottom; }
+  .line { border-bottom: 1px solid #222; min-width: 220px; display: inline-block; padding: 0 6px; }
+  canvas.pad { width: min(520px, 100%); height: 140px; border: 1px solid #222; border-radius: 8px; background: #fff; touch-action: none; cursor: crosshair; }
+  img.signature { height: 52px; vertical-align: middle; }
+  .sig-name { margin-left: 8px; }
+  .pad-error { color: #9b1c1c; margin: 6px 0 0; }
+  .fine { font-size: 12px; }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+  .check { font-weight: 400; }
+  .accounts { background: #f4f7fb; border-radius: 8px; padding: 10px 12px; margin: 12px 0 4px; }
+  .hostnote { background: #eef3fb; color: #17375e; border-radius: 8px; padding: 10px 12px; margin: 0 0 12px; }
+  @media print {
+    body { background: white; }
+    .nav, .no-print, .hostnote { display: none !important; }
+    main { margin: 0; max-width: none; }
+    .paper { box-shadow: none; }
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const WEEKEND = new Set(["Sunday", "Saturday"]);
+const START = "9.00AM";
+const FINISH = "5.00PM";
+const REASON = "Approved remote work";
+const STORE = "nycha-timesheet-hosted-v1";
+const SESSION = "nycha-timesheet-user";
+const PERMS = [
+  ["submit", "Submit time sheets"],
+  ["approve", "Review and approve"],
+  ["manage", "Manage users"]
+];
+
+function esc(value) {
+  return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function parseISO(value) {
+  const [year, month, day] = String(value).split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+function iso(date) {
+  return date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0") + "-" + String(date.getDate()).padStart(2, "0");
+}
+function addDays(date, count) {
+  const next = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  next.setDate(next.getDate() + count);
+  return next;
+}
+function formatDate(value) {
+  if (!value) return "";
+  const date = parseISO(value);
+  return String(date.getMonth() + 1).padStart(2, "0") + "/" + String(date.getDate()).padStart(2, "0") + "/" + date.getFullYear();
+}
+function sundayOnOrBefore(date) {
+  return addDays(date, -date.getDay());
+}
+function blankWeeks() {
+  return [0, 1].map(() => DAY_NAMES.map((day) => ({ day, date: "", start: "", finish: "" })));
+}
+function buildWeeks(formDate, periodStart) {
+  return [0, 1].map((week) => DAY_NAMES.map((day, offset) => {
+    const current = addDays(periodStart, week * 7 + offset);
+    if (WEEKEND.has(day) || current > formDate) return { day, date: "", start: "", finish: "" };
+    return { day, date: iso(current), start: START, finish: FINISH };
+  }));
+}
+function sampleSheet() {
+  const formDate = parseISO("2026-10-23");
+  const periodStart = parseISO("2026-10-18");
+  return {
+    id: 1,
+    employee_id: "divya",
+    employee_name: "Divya Radhakrishnan",
+    timekeeper: "",
+    kronos_id: "",
+    form_date: iso(formDate),
+    period_start: iso(periodStart),
+    reason: REASON,
+    witness: "",
+    weeks: buildWeeks(formDate, periodStart),
+    status: "submitted",
+    supervisor_name: "",
+    supervisor_date: "",
+    supervisor_signature: "",
+    employee_signature: "",
+    return_note: ""
+  };
+}
+function seed() {
+  return {
+    next_id: 2,
+    users: [
+      { id: "divya", name: "Divya Radhakrishnan", password: "timesheet", permissions: ["submit"] },
+      { id: "supervisor", name: "Supervisor", password: "approve", permissions: ["approve"] },
+      { id: "admin", name: "Admin", password: "manage", permissions: ["manage"] }
+    ],
+    sheets: [sampleSheet()]
+  };
+}
+function load() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORE) || "");
+    if (saved && Array.isArray(saved.users) && Array.isArray(saved.sheets)) return saved;
+  } catch (error) { /* use the seeded demo */ }
+  const fresh = seed();
+  localStorage.setItem(STORE, JSON.stringify(fresh));
+  return fresh;
+}
+let db = load();
+function persist() { localStorage.setItem(STORE, JSON.stringify(db)); }
+function currentUser() {
+  const id = sessionStorage.getItem(SESSION);
+  return db.users.find((user) => user.id === id) || null;
+}
+function can(user, permission) { return !!user && user.permissions.includes(permission); }
+function landing(user) {
+  if (can(user, "submit")) return "#/home";
+  if (can(user, "approve")) return "#/queue";
+  return "#/admin";
+}
+function permissionText(user) {
+  const labels = { submit: "employee", approve: "supervisor", manage: "admin" };
+  return user.permissions.map((item) => labels[item]).filter(Boolean).join(", ") || "no access";
+}
+function review(record) {
+  const issues = [];
+  if (!record.employee_name) issues.push("Employee name is blank.");
+  if (record.reason !== REASON) issues.push("Reason is " + JSON.stringify(record.reason) + "; the pattern uses " + JSON.stringify(REASON) + ".");
+  if (!record.form_date || !record.period_start) return issues.concat(["Form date and period start are required."]);
+  const formDate = parseISO(record.form_date);
+  const periodStart = parseISO(record.period_start);
+  const seen = {};
+  record.weeks.forEach((week, weekIndex) => {
+    week.forEach((entry, offset) => {
+      const expected = addDays(periodStart, weekIndex * 7 + offset);
+      const label = "Week " + (weekIndex + 1) + " " + entry.day;
+      if (WEEKEND.has(entry.day)) {
+        if (entry.date || entry.start || entry.finish) issues.push(label + " is a weekend and must stay blank.");
+        return;
+      }
+      if (expected > formDate) {
+        if (entry.date) issues.push(label + " is after the form date and must stay blank.");
+        return;
+      }
+      if (!entry.date) {
+        issues.push(label + " is a past weekday and has no hours.");
+        return;
+      }
+      if (entry.date !== iso(expected)) issues.push(label + " date is " + formatDate(entry.date) + ", expected " + formatDate(iso(expected)) + ".");
+      if (entry.start !== START || entry.finish !== FINISH) {
+        issues.push(label + " hours are " + (entry.start || "blank") + "-" + (entry.finish || "blank") + ", expected " + START + "-" + FINISH + ".");
+      }
+      if (seen[entry.date]) issues.push(label + " repeats " + formatDate(entry.date) + ", already used on " + seen[entry.date] + ".");
+      else seen[entry.date] = label;
+    });
+  });
+  return issues;
+}
+function statusBadge(status) {
+  const label = { submitted: "Waiting for supervisor", approved: "Approved", returned: "Returned" }[status] || status;
+  return "<span class='badge " + esc(status) + "'>" + esc(label) + "</span>";
+}
+function patternBox(issues) {
+  if (issues.length) {
+    return "<div class='warnbox no-print'><strong>Pattern check needs correction</strong><ul>" + issues.map((issue) => "<li>" + esc(issue) + "</li>").join("") + "</ul></div>";
+  }
+  return "<div class='ok no-print'>Pattern check: weekday hours match 9.00AM–5.00PM.</div>";
+}
+function signatureImage(data) {
+  if (!String(data).startsWith("data:image/png;base64,")) return "";
+  return "<img class='signature' alt='Drawn signature' src='" + esc(data) + "'>";
+}
+function weekTable(weeks, weekIndex, editable) {
+  const rows = weeks[weekIndex].map((row, dayIndex) => {
+    const shade = row.date ? "" : " class='shade'";
+    const dateCell = editable
+      ? "<input type='date' data-week='" + weekIndex + "' data-day='" + dayIndex + "' data-field='date' value='" + esc(row.date) + "'>"
+      : esc(row.date ? formatDate(row.date) : "");
+    const startCell = editable
+      ? "<input type='text' data-week='" + weekIndex + "' data-day='" + dayIndex + "' data-field='start' value='" + esc(row.start) + "'>"
+      : esc(row.start);
+    const finishCell = editable
+      ? "<input type='text' data-week='" + weekIndex + "' data-day='" + dayIndex + "' data-field='finish' value='" + esc(row.finish) + "'>"
+      : esc(row.finish);
+    return "<tr><td" + shade + ">" + esc(row.day) + "</td><td" + shade + ">" + dateCell + "</td><td" + shade + ">" + startCell + "</td><td" + shade + ">" + finishCell + "</td></tr>";
+  }).join("");
+  return "<table class='week'><thead><tr><th colspan='4'>WEEK " + (weekIndex + 1) + "</th></tr><tr><th>Day</th><th>MM/DD/YY</th><th>Start Time</th><th>Finish Time</th></tr></thead><tbody>" + rows + "</tbody></table>";
+}
+function field(name, label, value, type, editable) {
+  if (editable) return "<label for='" + name + "'>" + label + "</label><input id='" + name + "' name='" + name + "' type='" + type + "' value='" + esc(value) + "'>";
+  const shown = type === "date" && value ? formatDate(value) : value;
+  return "<div><strong>" + label + "</strong> " + (esc(shown) || "________") + "</div>";
+}
+function paperBlock(record, editable) {
+  const signed = ["submitted", "approved", "returned"].includes(record.status);
+  let employeeLine = "________";
+  if (editable) employeeLine = "<div class='no-print'><div>Draw your signature</div><canvas class='pad' id='employee-pad' width='520' height='140'></canvas><div><button type='button' class='secondary' id='employee-pad-clear'>Clear</button></div><p class='pad-error' id='employee-pad-error' hidden>Draw your signature before continuing.</p></div>";
+  else if (signatureImage(record.employee_signature)) employeeLine = signatureImage(record.employee_signature) + "<span class='sig-name'>" + esc(record.employee_name) + "</span>";
+  else if (signed) employeeLine = esc(record.employee_name);
+  const supervisorImage = signatureImage(record.supervisor_signature);
+  const supervisorLine = supervisorImage
+    ? supervisorImage + "<span class='sig-name'>" + esc(record.supervisor_name) + "</span>"
+    : (esc(record.supervisor_name) || "________");
+  const reason = editable ? "<textarea name='reason'>" + esc(record.reason || "") + "</textarea>" : (esc(record.reason) || "________");
+  const witness = editable ? "<input name='witness' type='text' value='" + esc(record.witness || "") + "'>" : (esc(record.witness) || "________");
+  return "<h1>NEW YORK CITY HOUSING AUTHORITY</h1><h2>SPECIAL BI-WEEKLY ALTERNATE TIME SHEET</h2>"
+    + "<div class='date-row'>" + field("form_date", "DATE", record.form_date, "date", editable) + "</div>"
+    + "<div>" + field("period_start", "Period start (Sunday)", record.period_start, "date", editable) + "</div>"
+    + "<table class='meta'><tr><td>" + field("timekeeper", "TO, Timekeeper", record.timekeeper || "", "text", editable) + "</td><td>" + field("kronos_id", "Kronos ID #", record.kronos_id || "", "text", editable) + "</td></tr><tr><td colspan='2'><strong>FROM</strong> " + esc(record.employee_name) + "</td></tr></table>"
+    + "<p><strong>SUBJECT:</strong> SPECIAL BI-WEEKLY ALTERNATE TIME SHEET</p><p>I understand:</p><ol><li>My ID card serves two purposes. It is the official NYCHA employee identification card as well as a time card. My ID card is to be carried at all times during working hours.</li><li>The original of this form will be kept on file by my location for future reference during timekeeping audits.</li></ol>"
+    + "<p>I certify that the time(s) stated below correctly reflect(s) my attendance for the following days.</p>"
+    + "<table class='grid'><tr><td>" + weekTable(record.weeks, 0, editable) + "</td><td>" + weekTable(record.weeks, 1, editable) + "</td></tr></table>"
+    + "<div class='reason'><strong>Reason for not using my Kronos identification card:</strong><br>" + reason + "</div>"
+    + "<table class='sign'><tr><td>Employee's Signature <span class='line'>" + employeeLine + "</span></td><td>Date <span class='line'>" + (signed ? esc(formatDate(record.form_date)) : "________") + "</span></td></tr>"
+    + "<tr><td>Witnessed by <em>(If other than Supervisor)</em><br>" + witness + "</td><td></td></tr>"
+    + "<tr><td>Supervisor's Approval <span class='line'>" + supervisorLine + "</span></td><td>Date <span class='line'>" + (record.supervisor_date ? esc(formatDate(record.supervisor_date)) : "________") + "</span></td></tr></table>"
+    + "<p class='fine'>(Supervisor's signature indicates approval for the time(s) and location(s) indicated above only. It is <strong>not</strong> approval for the failure to use the Kronos time clock.)</p>"
+    + "<p class='fine'>NYCHA 015.210A (Rev. 5/07)</p>";
+}
+function nav(user) {
+  if (!user) return "";
+  const links = ["<button type='button' data-go='" + landing(user) + "'>NYCHA Time Sheet</button>"];
+  if (can(user, "submit")) links.push("<button type='button' data-go='#/home'>My sheets</button>");
+  if (can(user, "approve")) links.push("<button type='button' data-go='#/queue'>Queue</button>");
+  if (can(user, "manage")) links.push("<button type='button' data-go='#/admin'>Users</button>");
+  return "<header class='nav'><div class='links'>" + links.join("") + "</div><div>" + esc(user.name) + " · " + esc(permissionText(user)) + " <button type='button' id='sign-out'>Sign out</button></div></header>";
+}
+function page(user, body) {
+  return nav(user) + "<main>" + body + "</main>";
+}
+function loginPage(error) {
+  return page(null, "<section class='card'><h1>Time sheet sign in</h1><p class='muted'>Employees submit hours. Supervisors review and approve. Admins create user ids and set permissions.</p><div class='hostnote'>This hosted demo keeps each browser's time sheets on that browser. It is not a shared payroll system.</div><div class='accounts'><div><strong>Employee</strong> · username <code>divya</code> · password <code>timesheet</code></div><div><strong>Supervisor</strong> · username <code>supervisor</code> · password <code>approve</code></div><div><strong>Admin</strong> · username <code>admin</code> · password <code>manage</code></div></div>" + (error ? "<div class='error'>" + esc(error) + "</div>" : "") + "<form id='login-form'><label for='username'>Username</label><input id='username' name='username' autocomplete='username' required><label for='password'>Password</label><input id='password' name='password' type='password' autocomplete='current-password' required><button class='primary' type='submit'>Sign in</button></form></section>");
+}
+function sheetRows(sheets, openLabel) {
+  return sheets.map((sheet) => {
+    let pattern = "Needs correction";
+    try { pattern = review(sheet).length ? "Needs correction" : "Matches"; } catch (error) { pattern = "Needs correction"; }
+    return "<tr><td>" + esc(formatDate(sheet.form_date)) + "</td><td>" + esc(formatDate(sheet.period_start)) + "</td><td>" + esc(pattern) + "</td><td>" + statusBadge(sheet.status) + "</td><td><button type='button' data-go='#/sheet/" + sheet.id + "'>" + openLabel + "</button> · <button type='button' data-print='" + sheet.id + "'>Download PDF</button></td></tr>";
+  }).join("");
+}
+function homePage(user) {
+  const sheets = db.sheets.filter((sheet) => sheet.employee_id === user.id).slice().reverse();
+  const table = sheets.length
+    ? "<table class='list'><thead><tr><th>Form date</th><th>Period start</th><th>Pattern</th><th>Status</th><th></th></tr></thead><tbody>" + sheetRows(sheets, "Open") + "</tbody></table>"
+    : "<p class='muted'>You have not submitted a time sheet yet.</p>";
+  return page(user, "<h1>My time sheets</h1><p><button class='primary' type='button' data-go='#/sheet/new'>New time sheet</button></p>" + table);
+}
+function queuePage(user) {
+  const order = { submitted: 0, returned: 1, approved: 2 };
+  const sheets = db.sheets.slice().sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9) || b.id - a.id);
+  const rows = sheets.map((sheet) => {
+    const pattern = review(sheet).length ? "Needs correction" : "Matches";
+    return "<tr><td>" + esc(sheet.employee_name) + "</td><td>" + esc(formatDate(sheet.form_date)) + "</td><td>" + pattern + "</td><td>" + statusBadge(sheet.status) + "</td><td><button type='button' data-go='#/sheet/" + sheet.id + "'>Review</button> · <button type='button' data-print='" + sheet.id + "'>Download PDF</button></td></tr>";
+  }).join("");
+  const table = sheets.length
+    ? "<table class='list'><thead><tr><th>Employee</th><th>Form date</th><th>Pattern</th><th>Status</th><th></th></tr></thead><tbody>" + rows + "</tbody></table>"
+    : "<p class='muted'>No time sheets have been submitted.</p>";
+  return page(user, "<h1>Supervisor queue</h1><p class='muted'>Open a sheet to review the hours and approve it.</p>" + table);
+}
+function choices(selected) {
+  return PERMS.map(([key, label]) => "<label class='choice'><input type='checkbox' name='perm_" + key + "' value='yes'" + (selected.includes(key) ? " checked" : "") + "> " + esc(label) + "</label>").join("");
+}
+function adminPage(user, error, notice) {
+  const message = error ? "<div class='error'>" + esc(error) + "</div>" : (notice ? "<div class='ok'>" + esc(notice) + "</div>" : "");
+  const rows = db.users.map((account) => "<tr><td><code>" + esc(account.id) + "</code></td><td><form data-user='" + esc(account.id) + "'><label>Name</label><input name='name' type='text' value='" + esc(account.name) + "' required><label>Permissions</label><div>" + choices(account.permissions) + "</div><label>New password</label><input name='password' type='password' autocomplete='new-password' placeholder='Leave blank to keep the current password'><button class='primary' type='submit'>Save</button></form></td></tr>").join("");
+  return page(user, "<h1>Users</h1><p class='muted'>Create a user id and choose what that person can do.</p>" + message + "<section class='panel'><h2>New user</h2><form id='create-user'><label for='new-id'>User id</label><input id='new-id' name='user_id' required><label for='new-name'>Name</label><input id='new-name' name='name' required><label for='new-password'>Password</label><input id='new-password' name='password' type='password' required><label>Permissions</label><div>" + choices(["submit"]) + "</div><button class='primary' type='submit'>Create user</button></form></section><table class='list'><thead><tr><th>User id</th><th>Permissions</th></tr></thead><tbody>" + rows + "</tbody></table>");
+}
+function editorPage(user, record, errors) {
+  const note = record.return_note ? "<div class='warnbox'>Supervisor note: " + esc(record.return_note) + "</div>" : "";
+  const errorHtml = errors && errors.length ? "<div class='error'>" + errors.map((error) => "<div>" + esc(error) + "</div>").join("") + "</div>" : "";
+  return page(user, "<div class='paper'>" + note + errorHtml + "<form id='sheet-form' data-id='" + (record.id || "") + "'>" + paperBlock(record, true) + "<p class='check'><label><input type='checkbox' name='certify' value='yes'> I certify that the hours above are my attendance.</label></p><div class='actions no-print'><button class='primary' name='action' value='submit' type='submit'>Submit to supervisor</button><button class='secondary' name='action' value='rebuild' type='submit'>Refill weekdays 9.00AM–5.00PM</button></div></form></div>");
+}
+function detailPage(user, record, error) {
+  const issues = review(record);
+  const note = record.return_note && record.status === "returned" ? "<div class='warnbox'>Returned: " + esc(record.return_note) + "</div>" : "";
+  let controls = error ? "<div class='error no-print'>" + esc(error) + "</div>" : "";
+  if (can(user, "approve") && record.status === "submitted") {
+    controls += "<div class='no-print'><form id='approve-form' data-id='" + record.id + "'><label for='signature_name'>Name to record on the supervisor line</label><input id='signature_name' name='signature_name' type='text' value='" + esc(user.name) + "' required><div>Draw your approval signature</div><canvas class='pad' id='supervisor-pad' width='520' height='140'></canvas><div><button type='button' class='secondary' id='supervisor-pad-clear'>Clear</button></div><p class='pad-error' id='supervisor-pad-error' hidden>Draw your signature before continuing.</p><div class='actions'><button class='primary' type='submit'>Approve</button></div></form><form id='return-form' data-id='" + record.id + "'><label for='note'>Note if you are sending it back</label><textarea id='note' name='note' placeholder='What needs to change'></textarea><button class='warn' type='submit'>Return to employee</button></form></div>";
+  } else if (can(user, "submit") && record.employee_id === user.id && record.status === "returned") {
+    controls = "<p class='no-print'><button class='primary' type='button' data-go='#/sheet/" + record.id + "/edit'>Edit and submit again</button></p>";
+  }
+  return page(user, "<div class='paper'><p class='no-print'>" + statusBadge(record.status) + " <button class='primary' type='button' id='print-sheet'>Download PDF</button></p>" + note + patternBox(issues) + paperBlock(record, false) + controls + "</div>");
+}
+function readWeeks(form) {
+  const weeks = blankWeeks();
+  form.querySelectorAll("[data-week]").forEach((input) => {
+    weeks[Number(input.dataset.week)][Number(input.dataset.day)][input.dataset.field] = input.value.trim();
+  });
+  return weeks;
+}
+function valueOf(form, name) {
+  const field = form.elements[name];
+  return field ? String(field.value || "").trim() : "";
+}
+function selectedPermissions(form) {
+  return PERMS.map(([key]) => key).filter((key) => form.elements["perm_" + key] && form.elements["perm_" + key].checked);
+}
+function blankCanvas(canvas) {
+  const probe = document.createElement("canvas");
+  probe.width = canvas.width;
+  probe.height = canvas.height;
+  return canvas.toDataURL() === probe.toDataURL();
+}
+function attachPad(canvasId) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const context = canvas.getContext("2d");
+  context.lineWidth = 2.4;
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.strokeStyle = "#142033";
+  let drawing = false;
+  function point(event) {
+    const rect = canvas.getBoundingClientRect();
+    const source = event.touches ? event.touches[0] : event;
+    return { x: (source.clientX - rect.left) * canvas.width / rect.width, y: (source.clientY - rect.top) * canvas.height / rect.height };
+  }
+  canvas.addEventListener("mousedown", (event) => { drawing = true; const p = point(event); context.beginPath(); context.moveTo(p.x, p.y); });
+  canvas.addEventListener("mousemove", (event) => { if (!drawing) return; const p = point(event); context.lineTo(p.x, p.y); context.stroke(); });
+  window.addEventListener("mouseup", () => { drawing = false; });
+  canvas.addEventListener("touchstart", (event) => { drawing = true; const p = point(event); context.beginPath(); context.moveTo(p.x, p.y); event.preventDefault(); }, { passive: false });
+  canvas.addEventListener("touchmove", (event) => { if (!drawing) return; const p = point(event); context.lineTo(p.x, p.y); context.stroke(); event.preventDefault(); }, { passive: false });
+  canvas.addEventListener("touchend", () => { drawing = false; });
+  const clear = document.getElementById(canvasId + "-clear");
+  if (clear) clear.addEventListener("click", () => context.clearRect(0, 0, canvas.width, canvas.height));
+}
+function go(hash) { location.hash = hash; }
+function findSheet(id) { return db.sheets.find((sheet) => sheet.id === Number(id)); }
+function visible(user, sheet) {
+  if (!sheet) return null;
+  if (can(user, "approve")) return sheet;
+  if (can(user, "submit") && sheet.employee_id === user.id) return sheet;
+  return null;
+}
+function todayRecord(user) {
+  const today = new Date();
+  const formDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const periodStart = sundayOnOrBefore(formDate);
+  return {
+    id: null, employee_id: user.id, employee_name: user.name, timekeeper: "", kronos_id: "",
+    form_date: iso(formDate), period_start: iso(periodStart), reason: REASON, witness: "",
+    weeks: buildWeeks(formDate, periodStart), status: "draft", supervisor_name: "", supervisor_date: "",
+    supervisor_signature: "", employee_signature: "", return_note: ""
+  };
+}
+function render() {
+  const user = currentUser();
+  const route = (location.hash || "#/").replace(/^#/, "") || "/";
+  const parts = route.split("/").filter(Boolean);
+  let html = loginPage("");
+  if (!user) {
+    html = loginPage("");
+  } else if (route === "/home") {
+    html = can(user, "submit") ? homePage(user) : queueOrAdmin(user);
+  } else if (route === "/queue") {
+    html = can(user, "approve") ? queuePage(user) : page(user, "<div class='card'>This account cannot review time sheets.</div>");
+  } else if (route === "/admin") {
+    html = can(user, "manage") ? adminPage(user, "", "") : page(user, "<div class='card'>Only an admin can manage users.</div>");
+  } else if (parts[0] === "sheet" && parts[1] === "new") {
+    html = can(user, "submit") ? editorPage(user, todayRecord(user), []) : page(user, "<div class='card'>Only an employee can submit a time sheet.</div>");
+  } else if (parts[0] === "sheet" && parts[2] === "edit") {
+    const sheet = visible(user, findSheet(parts[1]));
+    html = sheet && can(user, "submit") && sheet.employee_id === user.id && sheet.status === "returned"
+      ? editorPage(user, sheet, [])
+      : page(user, "<div class='card'>This time sheet cannot be edited.</div>");
+  } else if (parts[0] === "sheet" && parts[1]) {
+    const sheet = visible(user, findSheet(parts[1]));
+    html = sheet ? detailPage(user, sheet, "") : page(user, "<div class='card'>That time sheet is not available.</div>");
+  } else {
+    go(landing(user));
+    return;
+  }
+  document.getElementById("app").innerHTML = html;
+  attachPad("employee-pad");
+  attachPad("supervisor-pad");
+  const print = document.getElementById("print-sheet");
+  if (print) print.addEventListener("click", () => window.print());
+}
+function queueOrAdmin(user) {
+  if (can(user, "approve")) return queuePage(user);
+  if (can(user, "manage")) return adminPage(user, "", "");
+  return page(user, "<div class='card'>This account cannot submit time sheets.</div>");
+}
+document.getElementById("app").addEventListener("click", (event) => {
+  const target = event.target.closest("[data-go]");
+  if (target) { go(target.dataset.go); return; }
+  if (event.target.id === "sign-out") { sessionStorage.removeItem(SESSION); go("#/"); render(); return; }
+  const printId = event.target.closest("[data-print]");
+  if (printId) { go("#/sheet/" + printId.dataset.print); setTimeout(() => window.print(), 300); }
+});
+document.getElementById("app").addEventListener("submit", (event) => {
+  const form = event.target;
+  event.preventDefault();
+  const user = currentUser();
+  if (form.id === "login-form") {
+    const found = db.users.find((account) => account.id === valueOf(form, "username").toLowerCase() && account.password === valueOf(form, "password"));
+    if (!found) { document.getElementById("app").innerHTML = loginPage("Username or password is incorrect."); return; }
+    sessionStorage.setItem(SESSION, found.id);
+    go(landing(found));
+    return;
+  }
+  if (!user) { go("#/"); return; }
+  if (form.id === "sheet-form") saveSheet(user, form, event.submitter);
+  if (form.id === "approve-form") approveSheet(user, form);
+  if (form.id === "return-form") returnSheet(user, form);
+  if (form.id === "create-user") createUser(user, form);
+  if (form.dataset.user) updateUser(user, form);
+});
+function saveSheet(user, form, submitter) {
+  const action = submitter && submitter.value === "rebuild" ? "rebuild" : "submit";
+  const existing = form.dataset.id ? findSheet(form.dataset.id) : null;
+  const errors = [];
+  const formDateText = valueOf(form, "form_date");
+  const periodText = valueOf(form, "period_start");
+  if (!formDateText) errors.push("Form date is required.");
+  if (!periodText) errors.push("Period start is required.");
+  let formDate = null;
+  let periodStart = null;
+  if (formDateText) formDate = parseISO(formDateText);
+  if (periodText) {
+    periodStart = parseISO(periodText);
+    if (periodStart.getDay() !== 0) errors.push("Period start must be a Sunday.");
+  }
+  const record = existing ? Object.assign({}, existing) : todayRecord(user);
+  record.form_date = formDateText;
+  record.period_start = periodText;
+  record.timekeeper = valueOf(form, "timekeeper");
+  record.kronos_id = valueOf(form, "kronos_id");
+  record.reason = valueOf(form, "reason");
+  record.witness = valueOf(form, "witness");
+  record.employee_name = user.name;
+  record.employee_id = user.id;
+  if (action === "rebuild" && formDate && periodStart && periodStart.getDay() === 0) record.weeks = buildWeeks(formDate, periodStart);
+  else record.weeks = readWeeks(form);
+  if (action === "submit" && !form.elements.certify.checked) errors.push("Check the certification box before submitting.");
+  const pad = document.getElementById("employee-pad");
+  if (action === "submit" && (!pad || blankCanvas(pad))) errors.push("Draw your signature before submitting.");
+  if (action === "rebuild" || errors.length) {
+    document.getElementById("app").innerHTML = editorPage(user, record, action === "rebuild" ? [] : errors);
+    attachPad("employee-pad");
+    return;
+  }
+  record.employee_signature = pad.toDataURL("image/png");
+  record.status = "submitted";
+  record.return_note = "";
+  if (existing) Object.assign(existing, record);
+  else { record.id = db.next_id++; db.sheets.push(record); }
+  persist();
+  go("#/sheet/" + record.id);
+}
+function approveSheet(user, form) {
+  const sheet = findSheet(form.dataset.id);
+  const pad = document.getElementById("supervisor-pad");
+  const name = valueOf(form, "signature_name");
+  if (!sheet || sheet.status !== "submitted") { go("#/queue"); return; }
+  if (!name || !pad || blankCanvas(pad)) {
+    document.getElementById("app").innerHTML = detailPage(user, sheet, "Draw your signature and enter your name.");
+    attachPad("supervisor-pad");
+    return;
+  }
+  sheet.status = "approved";
+  sheet.supervisor_name = name;
+  sheet.supervisor_date = iso(new Date());
+  sheet.supervisor_signature = pad.toDataURL("image/png");
+  sheet.supervisor_id = user.id;
+  persist();
+  go("#/sheet/" + sheet.id);
+  render();
+}
+function returnSheet(user, form) {
+  const sheet = findSheet(form.dataset.id);
+  if (!sheet || sheet.status !== "submitted") { go("#/queue"); return; }
+  sheet.status = "returned";
+  sheet.return_note = valueOf(form, "note") || "Please correct this time sheet.";
+  sheet.supervisor_name = "";
+  sheet.supervisor_date = "";
+  sheet.supervisor_signature = "";
+  persist();
+  go("#/sheet/" + sheet.id);
+  render();
+}
+function createUser(user, form) {
+  if (!can(user, "manage")) return;
+  const userId = valueOf(form, "user_id").toLowerCase();
+  const name = valueOf(form, "name");
+  const password = form.elements.password.value;
+  const permissions = selectedPermissions(form);
+  const errors = [];
+  if (!/^[a-z][a-z0-9._-]{1,31}$/.test(userId)) errors.push("User id must start with a letter and use only letters, numbers, dots, underscores, or hyphens.");
+  if (!name || name.length > 80) errors.push("Name is required.");
+  if (password.length < 4) errors.push("Password must be at least 4 characters.");
+  if (!permissions.length) errors.push("Choose at least one permission.");
+  if (db.users.some((account) => account.id === userId)) errors.push("That user id already exists.");
+  if (errors.length) { document.getElementById("app").innerHTML = adminPage(user, errors.join(" "), ""); wireAdmin(); return; }
+  db.users.push({ id: userId, name, password, permissions });
+  persist();
+  document.getElementById("app").innerHTML = adminPage(user, "", "User id created.");
+  wireAdmin();
+}
+function updateUser(actor, form) {
+  if (!can(actor, "manage")) return;
+  const account = db.users.find((item) => item.id === form.dataset.user);
+  if (!account) return;
+  const name = valueOf(form, "name");
+  const password = form.elements.password.value;
+  const permissions = selectedPermissions(form);
+  const errors = [];
+  if (!name || name.length > 80) errors.push("Name is required.");
+  if (password && password.length < 4) errors.push("Password must be at least 4 characters.");
+  if (!permissions.length) errors.push("Choose at least one permission.");
+  const others = db.users.filter((item) => item.id !== account.id && item.permissions.includes("manage"));
+  if (!permissions.includes("manage") && !others.length) errors.push("Keep at least one user who can manage users.");
+  if (errors.length) { document.getElementById("app").innerHTML = adminPage(actor, errors.join(" "), ""); wireAdmin(); return; }
+  account.name = name;
+  account.permissions = permissions;
+  if (password) account.password = password;
+  persist();
+  document.getElementById("app").innerHTML = adminPage(actor, "", "Permissions saved.");
+  wireAdmin();
+}
+function wireAdmin() {}
+window.addEventListener("hashchange", render);
+render();
+</script>
+</body>
+</html>
