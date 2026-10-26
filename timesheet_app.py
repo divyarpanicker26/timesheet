@@ -13,6 +13,7 @@ import json
 import re
 import secrets
 import sys
+import tempfile
 import threading
 from datetime import date
 from http.cookies import SimpleCookie
@@ -31,10 +32,13 @@ from generate_timesheet import (  # noqa: E402
     DayEntry,
     Timesheet,
     build_timesheet,
+    employee_slug,
     format_date,
     parse_user_date,
+    render_html,
     review,
     sunday_on_or_before,
+    write_pdf,
 )
 
 DATA_PATH = ROOT / "data" / "timesheets.json"
@@ -181,6 +185,11 @@ def to_model(record: dict) -> Timesheet:
         start_time=DEFAULT_START,
         finish_time=DEFAULT_FINISH,
         weeks=(weeks[0], weeks[1]),
+        employee_signature=record.get("employee_signature", ""),
+        supervisor_name=record.get("supervisor_name", ""),
+        supervisor_date=date.fromisoformat(record["supervisor_date"]) if record.get("supervisor_date") else None,
+        supervisor_signature=record.get("supervisor_signature", ""),
+        witness=record.get("witness", ""),
     )
 
 
@@ -502,7 +511,7 @@ def home_page(user: dict, sheets: list[dict]) -> str:
             f"<td>{esc(format_date(date.fromisoformat(sheet['period_start'])))}</td>"
             f"<td>{esc(pattern)}</td>"
             f"<td>{status_badge(sheet['status'])}</td>"
-            f"<td><a href='/sheet/{sheet['id']}'>Open</a></td>"
+            f"<td><a href='/sheet/{sheet['id']}'>Open</a> · <a href='/sheet/{sheet['id']}/pdf'>Download PDF</a></td>"
             "</tr>"
         )
     table = (
@@ -534,7 +543,7 @@ def queue_page(user: dict, sheets: list[dict]) -> str:
             f"<td>{esc(format_date(date.fromisoformat(sheet['form_date'])))}</td>"
             f"<td>{esc(pattern)}</td>"
             f"<td>{status_badge(sheet['status'])}</td>"
-            f"<td><a href='/sheet/{sheet['id']}'>Review</a></td>"
+            f"<td><a href='/sheet/{sheet['id']}'>Review</a> · <a href='/sheet/{sheet['id']}/pdf'>Download PDF</a></td>"
             "</tr>"
         )
     table = (
@@ -816,7 +825,7 @@ def detail_page(user: dict, record: dict, csrf: str, error: str = "") -> str:
         controls = f"<p class='no-print'><a class='button' href='/sheet/{record['id']}/edit'>Edit and submit again</a></p>"
     body = f"""
     <div class="paper">
-      <p class="no-print">{status_badge(record['status'])}</p>
+      <p class="no-print">{status_badge(record['status'])} <a class="button" href="/sheet/{record['id']}/pdf">Download PDF</a></p>
       {note}
       <div class="no-print">{pattern_box(issues)}</div>
       {paper_block(record, False)}
@@ -885,6 +894,9 @@ class App(BaseHTTPRequestHandler):
                     return
                 if method == "GET" and action == "edit":
                     self.edit_sheet(user, sheet_id)
+                    return
+                if method == "GET" and action == "pdf":
+                    self.download_sheet(user, sheet_id)
                     return
                 if method == "POST" and action == "":
                     self.save_sheet(user, form, sheet_id)
@@ -1038,6 +1050,27 @@ class App(BaseHTTPRequestHandler):
         mutate_db(save)
         self.redirect(f"/sheet/{record['id']}")
 
+    def download_sheet(self, user: dict, sheet_id: int) -> None:
+        sheet = self.visible_sheet(user, sheet_id)
+        if not sheet:
+            self.redirect("/home" if user["role"] == "employee" else "/queue")
+            return
+        try:
+            pdf, filename = sheet_pdf(sheet)
+        except (OSError, RuntimeError, ValueError, KeyError) as exc:
+            self.respond(
+                render_page("PDF", f"<div class='card'><div class='error'>{esc(exc)}</div></div>", user),
+                500,
+            )
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "application/pdf")
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(pdf)))
+        self.end_headers()
+        self.wfile.write(pdf)
+
     def view_sheet(self, user: dict, sheet_id: int) -> None:
         sheet = self.visible_sheet(user, sheet_id)
         if not sheet:
@@ -1088,6 +1121,18 @@ class App(BaseHTTPRequestHandler):
 
         mutate_db(send_back)
         self.redirect(f"/sheet/{sheet_id}")
+
+
+def sheet_pdf(record: dict) -> tuple[bytes, str]:
+    """Print one saved time sheet to PDF bytes."""
+    sheet = to_model(record)
+    with tempfile.TemporaryDirectory(prefix="timesheet-download-") as folder:
+        html_path = Path(folder) / "sheet.html"
+        html_path.write_text(render_html(sheet), encoding="utf-8")
+        pdf_path = write_pdf(html_path)
+        data = pdf_path.read_bytes()
+    filename = f"timesheet_{employee_slug(sheet.employee)}_{sheet.form_date.isoformat()}.pdf"
+    return data, filename
 
 
 def main() -> None:

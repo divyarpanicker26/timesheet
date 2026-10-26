@@ -73,6 +73,11 @@ class Timesheet:
     start_time: str
     finish_time: str
     weeks: tuple[tuple[DayEntry, ...], tuple[DayEntry, ...]]
+    employee_signature: str = ""
+    supervisor_name: str = ""
+    supervisor_date: date | None = None
+    supervisor_signature: str = ""
+    witness: str = ""
 
 
 def sunday_on_or_before(day: date) -> date:
@@ -269,6 +274,17 @@ def render_html(sheet: Timesheet) -> str:
     timekeeper = html.escape(sheet.timekeeper) or "&nbsp;"
     kronos = html.escape(sheet.kronos_id) or "&nbsp;"
     employee = html.escape(sheet.employee)
+    employee_mark = signature_image(sheet.employee_signature)
+    employee_line = f"{employee_mark} {employee}" if employee_mark else employee
+    witness = html.escape(sheet.witness) if sheet.witness else "<span class='blank'>.</span>"
+    supervisor_mark = signature_image(sheet.supervisor_signature)
+    supervisor_name = html.escape(sheet.supervisor_name)
+    if supervisor_mark or sheet.supervisor_name:
+        supervisor_line = f"{supervisor_mark} {supervisor_name}".strip()
+        supervisor_date = html.escape(format_date(sheet.supervisor_date)) or "<span class='blank'>.</span>"
+    else:
+        supervisor_line = "<span class='blank'>.</span>"
+        supervisor_date = "<span class='blank'>.</span>"
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -355,6 +371,12 @@ def render_html(sheet: Timesheet) -> str:
     .fine {{ font-size: 9pt; margin-top: 8px; }}
     .form-code {{ font-size: 8.5pt; margin-top: 12px; }}
     .blank {{ color: transparent; }}
+    img.signature {{
+      display: inline-block;
+      height: 36px;
+      max-width: 2.2in;
+      vertical-align: bottom;
+    }}
   </style>
 </head>
 <body>
@@ -393,16 +415,16 @@ def render_html(sheet: Timesheet) -> str:
 
   <table class="signatures">
     <tr>
-      <td>Employee's Signature <span class="line">{employee}</span></td>
+      <td>Employee's Signature <span class="line">{employee_line}</span></td>
       <td>Date <span class="line short">{html.escape(format_date(sheet.form_date))}</span></td>
     </tr>
     <tr>
-      <td>Witnessed by<br><em>(If other than Supervisor)</em> <span class="line blank">.</span></td>
+      <td>Witnessed by<br><em>(If other than Supervisor)</em> <span class="line">{witness}</span></td>
       <td>Date <span class="line short blank">.</span></td>
     </tr>
     <tr>
-      <td>Supervisor's Approval <span class="line blank">.</span></td>
-      <td>Date <span class="line short blank">.</span></td>
+      <td>Supervisor's Approval <span class="line">{supervisor_line}</span></td>
+      <td>Date <span class="line short">{supervisor_date}</span></td>
     </tr>
   </table>
   <p class="fine">(Supervisor's signature indicates approval for the time(s) and location(s) indicated above only. It is <strong>not</strong> approval for the failure to use the Kronos time clock.)</p>
@@ -410,6 +432,16 @@ def render_html(sheet: Timesheet) -> str:
 </body>
 </html>
 """
+
+
+def signature_image(data: str) -> str:
+    """Return an img tag for a drawn PNG signature, or an empty string."""
+    if not data.startswith("data:image/png;base64,"):
+        return ""
+    payload = data.split(",", 1)[1]
+    if len(data) > 400_000 or not re.fullmatch(r"[A-Za-z0-9+/=]+", payload or ""):
+        return ""
+    return f"<img class='signature' alt='Drawn signature' src='{html.escape(data)}'>"
 
 
 def parse_user_date(value: str) -> date:
