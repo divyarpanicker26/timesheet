@@ -2,6 +2,7 @@
 
 Employees sign in, fill the bi-weekly form, and submit it.
 Supervisors sign in, review the weekday pattern, and approve with their own signature.
+Admins sign in, create user ids, and choose each person's permissions.
 
 Run: python timesheet_app.py
 """
@@ -15,7 +16,7 @@ import secrets
 import sys
 import tempfile
 import threading
-from datetime import date
+from datetime import date, datetime
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -33,6 +34,7 @@ from generate_timesheet import (  # noqa: E402
     Timesheet,
     build_timesheet,
     employee_slug,
+    digital_signature_html,
     format_date,
     parse_user_date,
     render_html,
@@ -49,6 +51,18 @@ DB_LOCK = threading.Lock()
 
 EMPLOYEE_PASSWORD = "timesheet"
 SUPERVISOR_PASSWORD = "approve"
+ADMIN_PASSWORD = "manage"
+PERMISSIONS = (
+    ("submit", "Submit time sheets"),
+    ("approve", "Review and approve"),
+    ("manage", "Manage users"),
+)
+ROLE_PERMISSIONS = {
+    "employee": ["submit"],
+    "supervisor": ["approve"],
+    "admin": ["manage"],
+}
+USER_ID = re.compile(r"^[a-z][a-z0-9._-]{1,31}$")
 
 
 def hash_password(password: str, salt: str | None = None) -> str:
@@ -63,25 +77,85 @@ def check_password(stored: str, password: str) -> bool:
     return secrets.compare_digest(test, digest)
 
 
+def make_user(user_id: str, name: str, password: str, permissions: list[str]) -> dict:
+    return {
+        "id": user_id,
+        "name": name,
+        "role": role_name(permissions),
+        "permissions": permissions,
+        "password": hash_password(password),
+    }
+
+
 def seed_db() -> dict:
     return {
         "next_id": 1,
         "users": [
-            {
-                "id": "divya",
-                "name": "Divya Radhakrishnan",
-                "role": "employee",
-                "password": hash_password(EMPLOYEE_PASSWORD),
-            },
-            {
-                "id": "supervisor",
-                "name": "Supervisor",
-                "role": "supervisor",
-                "password": hash_password(SUPERVISOR_PASSWORD),
-            },
+            make_user("divya", "Divya Radhakrishnan", EMPLOYEE_PASSWORD, ["submit"]),
+            make_user("supervisor", "Supervisor", SUPERVISOR_PASSWORD, ["approve"]),
+            make_user("admin", "Admin", ADMIN_PASSWORD, ["manage"]),
         ],
         "sheets": [],
     }
+
+
+def permissions_of(user: dict) -> list[str]:
+    stored = user.get("permissions")
+    allowed = {key for key, _label in PERMISSIONS}
+    if isinstance(stored, list):
+        return [item for item in stored if item in allowed]
+    return list(ROLE_PERMISSIONS.get(user.get("role", ""), []))
+
+
+def can(user: dict, permission: str) -> bool:
+    return permission in permissions_of(user)
+
+
+def role_name(permissions: list[str]) -> str:
+    if "manage" in permissions and "submit" not in permissions and "approve" not in permissions:
+        return "admin"
+    if "approve" in permissions and "submit" not in permissions:
+        return "supervisor"
+    if "submit" in permissions and "approve" not in permissions and "manage" not in permissions:
+        return "employee"
+    if "manage" in permissions:
+        return "admin"
+    if "approve" in permissions:
+        return "supervisor"
+    return "employee"
+
+
+def permission_text(user: dict) -> str:
+    labels = {"submit": "employee", "approve": "supervisor", "manage": "admin"}
+    names = [labels[item] for item in permissions_of(user) if item in labels]
+    return ", ".join(names) or "no access"
+
+
+def landing(user: dict) -> str:
+    if can(user, "submit"):
+        return "/home"
+    if can(user, "approve"):
+        return "/queue"
+    if can(user, "manage"):
+        return "/admin"
+    return "/home"
+
+
+def ensure_accounts(db: dict) -> bool:
+    """Fill missing permissions and add the admin account once."""
+    changed = False
+    for user in db["users"]:
+        if not isinstance(user.get("permissions"), list):
+            user["permissions"] = list(ROLE_PERMISSIONS.get(user.get("role", "employee"), ["submit"]))
+            changed = True
+        role = role_name(user["permissions"])
+        if user.get("role") != role:
+            user["role"] = role
+            changed = True
+    if not any(can(user, "manage") for user in db["users"]):
+        db["users"].append(make_user("admin", "Admin", ADMIN_PASSWORD, ["manage"]))
+        changed = True
+    return changed
 
 
 def load_db() -> dict:
@@ -90,7 +164,10 @@ def load_db() -> dict:
         db = seed_db()
         DATA_PATH.write_text(json.dumps(db, indent=2), encoding="utf-8")
         return db
-    return json.loads(DATA_PATH.read_text(encoding="utf-8"))
+    db = json.loads(DATA_PATH.read_text(encoding="utf-8"))
+    if ensure_accounts(db):
+        save_db(db)
+    return db
 
 
 def save_db(db: dict) -> None:
@@ -162,7 +239,12 @@ def new_record(user: dict, form_date: date, period_start: date) -> dict:
         "supervisor_name": "",
         "supervisor_date": "",
         "supervisor_signature": "",
+        "supervisor_sign_method": "",
+        "supervisor_signed_at": "",
         "employee_signature": "",
+        "employee_sign_method": "",
+        "employee_sign_date": "",
+        "employee_signed_at": "",
         "return_note": "",
     }
 
@@ -186,9 +268,14 @@ def to_model(record: dict) -> Timesheet:
         finish_time=DEFAULT_FINISH,
         weeks=(weeks[0], weeks[1]),
         employee_signature=record.get("employee_signature", ""),
+        employee_sign_method=record.get("employee_sign_method", ""),
+        employee_sign_date=date.fromisoformat(record["employee_sign_date"][:10]) if record.get("employee_sign_date") else None,
+        employee_signed_at=record.get("employee_signed_at", ""),
         supervisor_name=record.get("supervisor_name", ""),
-        supervisor_date=date.fromisoformat(record["supervisor_date"]) if record.get("supervisor_date") else None,
+        supervisor_date=date.fromisoformat(record["supervisor_date"][:10]) if record.get("supervisor_date") else None,
         supervisor_signature=record.get("supervisor_signature", ""),
+        supervisor_sign_method=record.get("supervisor_sign_method", ""),
+        supervisor_signed_at=record.get("supervisor_signed_at", ""),
         witness=record.get("witness", ""),
     )
 
@@ -215,6 +302,10 @@ def record_from_post(form: dict[str, str], user: dict, existing: dict | None) ->
         errors.append("Period start must be a Sunday.")
     if form.get("action") == "submit" and form.get("certify") != "yes":
         errors.append("Check the certification box before submitting.")
+    if form.get("action") == "submit" and not (
+        existing and existing.get("employee_sign_method") == "digital" and existing.get("employee_signed_at")
+    ):
+        errors.append("Use the Sign button before submitting.")
 
     weeks = blank_weeks()
     if form.get("action") == "rebuild":
@@ -247,12 +338,14 @@ def record_from_post(form: dict[str, str], user: dict, existing: dict | None) ->
         "supervisor_name": "",
         "supervisor_date": "",
         "supervisor_signature": "",
+        "supervisor_sign_method": "",
+        "supervisor_signed_at": "",
         "employee_signature": "",
+        "employee_sign_method": "",
+        "employee_sign_date": "",
+        "employee_signed_at": "",
         "return_note": "",
     }
-    signature = clean_signature(form.get("employee_signature", ""))
-    if form.get("action") == "submit" and not signature:
-        errors.append("Draw your signature before submitting.")
     record = {
         **base,
         "employee_id": user["id"],
@@ -263,7 +356,10 @@ def record_from_post(form: dict[str, str], user: dict, existing: dict | None) ->
         "period_start": period_start.isoformat() if period_start else form.get("period_start", ""),
         "reason": form.get("reason", "").strip(),
         "witness": form.get("witness", "").strip(),
-        "employee_signature": signature or base.get("employee_signature", ""),
+        "employee_signature": base.get("employee_signature", ""),
+        "employee_sign_method": base.get("employee_sign_method", ""),
+        "employee_sign_date": base.get("employee_sign_date", ""),
+        "employee_signed_at": base.get("employee_signed_at", ""),
         "weeks": weeks,
     }
     return record, errors
@@ -332,6 +428,10 @@ PAGE = """<!DOCTYPE html>
     font: inherit;
   }
   .nav form { margin: 0; }
+  .nav .links { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  label.choice { display: inline-flex; align-items: center; gap: 6px; margin: 8px 16px 8px 0; font-weight: 500; }
+  .panel { background: white; border-radius: 10px; padding: 20px 22px; margin: 16px 0 24px; }
+  .panel h2 { margin: 0 0 4px; font-size: 20px; }
   main { max-width: 1100px; margin: 24px auto 48px; padding: 0 16px; }
   .card, .paper {
     background: white;
@@ -381,7 +481,26 @@ PAGE = """<!DOCTYPE html>
   .badge { font-weight: 700; }
   .badge.submitted { color: #1a4f8b; }
   .badge.approved { color: #146c2e; }
+  .badge.draft { color: #526074; }
   .badge.returned { color: #9b1c1c; }
+  .sign-btn {
+    display: inline-block;
+    margin: 0 4px 2px;
+    padding: 1px 8px;
+    border: 0;
+    border-radius: 3px;
+    background: #c2410c;
+    color: white;
+    font-family: "Segoe UI", Calibri, sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.4;
+    cursor: pointer;
+    text-decoration: none;
+    vertical-align: middle;
+  }
+  .sign-btn:hover { background: #9a3412; }
+  .sig-preview { margin: 18px 0; padding: 16px; background: #fff; border: 1px solid #d5deea; border-radius: 8px; }
   .paper { padding: 28px 32px 36px; font-family: "Times New Roman", Times, serif; }
   .paper h1, .paper h2 { text-align: center; margin: 0; letter-spacing: .02em; }
   .paper h1 { font-size: 22px; }
@@ -405,18 +524,14 @@ PAGE = """<!DOCTYPE html>
   .sign { width: 100%; margin-top: 14px; }
   .sign td { padding: 7px 8px 7px 0; vertical-align: bottom; }
   .line { border-bottom: 1px solid #222; min-width: 220px; display: inline-block; padding: 0 6px; }
-  canvas.pad {
-    width: min(520px, 100%);
-    height: 140px;
-    border: 1px solid #222;
-    border-radius: 8px;
-    background: #fff;
-    touch-action: none;
-    cursor: crosshair;
-  }
+  table.sign td:first-child { width: 74%; }
   img.signature { height: 52px; vertical-align: middle; }
   .sig-name { margin-left: 8px; }
-  .pad-error { color: #9b1c1c; margin: 6px 0 0; }
+  .sig-block { display: inline-flex; align-items: center; gap: 10px; vertical-align: bottom; white-space: nowrap; }
+  .sig-script { font-family: "Segoe Script", "Brush Script MT", "Lucida Handwriting", cursive; font-size: 26px; font-weight: 700; line-height: 1; color: #111; white-space: nowrap; }
+  .sig-stamp { display: inline-flex; flex-direction: column; font-family: "Segoe UI", Calibri, sans-serif; font-size: 10px; line-height: 1.15; color: #111; }
+  .sig-stamp span { white-space: nowrap; }
+  .choice { margin-right: 16px; font-weight: 650; }
   .fine { font-size: 12px; }
   .actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
   .actions form, .actions button { margin: 0; }
@@ -442,14 +557,20 @@ __BODY__
 
 def render_page(title: str, body: str, user: dict | None = None) -> str:
     if user:
-        home = "/queue" if user["role"] == "supervisor" else "/home"
+        links = ["<a href='" + landing(user) + "'>NYCHA Time Sheet</a>"]
+        if can(user, "submit"):
+            links.append("<a href='/home'>My sheets</a>")
+        if can(user, "approve"):
+            links.append("<a href='/queue'>Queue</a>")
+        if can(user, "manage"):
+            links.append("<a href='/admin'>Users</a>")
         nav = (
-            "<header class='nav'><div><a href='"
-            + home
-            + "'>NYCHA Time Sheet</a></div><div>"
+            "<header class='nav'><div class='links'>"
+            + "".join(links)
+            + "</div><div>"
             + esc(user["name"])
             + " · "
-            + esc(user["role"])
+            + esc(permission_text(user))
             + " <form method='post' action='/logout' style='display:inline'>"
             + "<input type='hidden' name='csrf' value='"
             + esc(user.get("_csrf", ""))
@@ -465,10 +586,11 @@ def login_page(error: str = "") -> str:
     body = f"""
     <section class="card">
       <h1>Time sheet sign in</h1>
-      <p class="muted">Employees submit hours. Supervisors review and approve.</p>
+      <p class="muted">Employees submit hours. Supervisors review and approve. Admins create user ids and set permissions.</p>
       <div class="accounts">
         <div><strong>Employee</strong> · username <code>divya</code> · password <code>{EMPLOYEE_PASSWORD}</code></div>
         <div><strong>Supervisor</strong> · username <code>supervisor</code> · password <code>{SUPERVISOR_PASSWORD}</code></div>
+        <div><strong>Admin</strong> · username <code>admin</code> · password <code>{ADMIN_PASSWORD}</code></div>
       </div>
       {message}
       <form method="post" action="/login">
@@ -484,9 +606,12 @@ def login_page(error: str = "") -> str:
 
 
 def status_badge(status: str) -> str:
-    label = {"submitted": "Waiting for supervisor", "approved": "Approved", "returned": "Returned"}.get(
-        status, status
-    )
+    label = {
+        "draft": "Not submitted",
+        "submitted": "Waiting for supervisor",
+        "approved": "Approved",
+        "returned": "Returned",
+    }.get(status, status)
     return f"<span class='badge {esc(status)}'>{esc(label)}</span>"
 
 
@@ -593,84 +718,15 @@ def week_table(weeks: list, week_index: int, editable: bool) -> str:
     )
 
 
-def signature_pad(canvas_id: str, field_name: str, label: str) -> str:
-    return f"""
-    <div class="no-print">
-      <div>{esc(label)}</div>
-      <canvas class="pad" id="{canvas_id}" width="520" height="140"></canvas>
-      <div><button type="button" class="secondary" id="{canvas_id}-clear">Clear</button></div>
-      <p class="pad-error" id="{canvas_id}-error" hidden>Draw your signature before continuing.</p>
-      <input type="hidden" name="{field_name}" id="{field_name}">
-    </div>
-    """
+def sign_stamp() -> str:
+    return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
-SIGN_SCRIPT = """
-<script>
-function attachPad(canvasId, inputId, formId) {
-  const canvas = document.getElementById(canvasId);
-  const input = document.getElementById(inputId);
-  const form = document.getElementById(formId);
-  if (!canvas || !input || !form) return;
-  const ctx = canvas.getContext("2d");
-  ctx.lineWidth = 2.4;
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  ctx.strokeStyle = "#142033";
-  let drawing = false;
-  function point(event) {
-    const rect = canvas.getBoundingClientRect();
-    const source = event.touches ? event.touches[0] : event;
-    return {
-      x: (source.clientX - rect.left) * canvas.width / rect.width,
-      y: (source.clientY - rect.top) * canvas.height / rect.height
-    };
-  }
-  function start(event) {
-    drawing = true;
-    const p = point(event);
-    ctx.beginPath();
-    ctx.moveTo(p.x, p.y);
-    event.preventDefault();
-  }
-  function move(event) {
-    if (!drawing) return;
-    const p = point(event);
-    ctx.lineTo(p.x, p.y);
-    ctx.stroke();
-    event.preventDefault();
-  }
-  function stop() { drawing = false; }
-  canvas.addEventListener("mousedown", start);
-  canvas.addEventListener("mousemove", move);
-  window.addEventListener("mouseup", stop);
-  canvas.addEventListener("touchstart", start, {passive: false});
-  canvas.addEventListener("touchmove", move, {passive: false});
-  canvas.addEventListener("touchend", stop);
-  const clear = document.getElementById(canvasId + "-clear");
-  if (clear) {
-    clear.addEventListener("click", () => ctx.clearRect(0, 0, canvas.width, canvas.height));
-  }
-  form.addEventListener("submit", (event) => {
-    const submitter = event.submitter;
-    if (submitter && submitter.value === "rebuild") return;
-    const probe = document.createElement("canvas");
-    probe.width = canvas.width;
-    probe.height = canvas.height;
-    if (canvas.toDataURL() === probe.toDataURL()) {
-      event.preventDefault();
-      const message = document.getElementById(canvasId + "-error");
-      if (message) message.hidden = false;
-      return;
-    }
-    input.value = canvas.toDataURL("image/png");
-  });
-}
-</script>
-"""
+def sign_button(label: str = "Sign") -> str:
+    return f'<button class="sign-btn no-print" name="action" value="sign" type="submit">{esc(label)}</button>'
 
 
-def paper_block(record: dict, editable: bool) -> str:
+def paper_block(record: dict, editable: bool, supervisor_sign_href: str = "") -> str:
     def field(name: str, label: str, value: str, input_type: str = "text") -> str:
         if editable:
             return (
@@ -697,10 +753,22 @@ def paper_block(record: dict, editable: bool) -> str:
     else:
         reason = esc(record.get("reason", "")) or "________"
         witness = esc(record.get("witness", "")) or "________"
-    employee_signed = record.get("status") in {"submitted", "approved", "returned"}
+    employee_signed = record.get("status") in {"submitted", "approved", "returned"} or (
+        record.get("employee_sign_method") == "digital" and bool(record.get("employee_signed_at"))
+    )
     employee_image = signature_markup(record.get("employee_signature", ""))
-    if editable:
-        employee_line = signature_pad("employee-pad", "employee_signature", "Draw your signature")
+    if editable and record.get("employee_sign_method") == "digital" and record.get("employee_signed_at"):
+        employee_line = digital_signature_html(
+            record["employee_name"],
+            record.get("employee_signed_at") or record.get("employee_sign_date", ""),
+        )
+    elif editable:
+        employee_line = sign_button()
+    elif record.get("employee_sign_method") == "digital":
+        employee_line = digital_signature_html(
+            record["employee_name"],
+            record.get("employee_signed_at") or record.get("employee_sign_date", ""),
+        )
     elif employee_image:
         employee_line = f"{employee_image}<span class='sig-name'>{esc(record['employee_name'])}</span>"
     elif employee_signed:
@@ -714,7 +782,14 @@ def paper_block(record: dict, editable: bool) -> str:
         except ValueError:
             employee_date = esc(record["form_date"])
     supervisor_image = signature_markup(record.get("supervisor_signature", ""))
-    if supervisor_image:
+    if record.get("supervisor_sign_method") == "digital" and record.get("supervisor_name"):
+        supervisor_line = digital_signature_html(
+            record.get("supervisor_name", ""),
+            record.get("supervisor_signed_at") or record.get("supervisor_date", ""),
+        )
+    elif supervisor_sign_href:
+        supervisor_line = f'<a class="sign-btn no-print" href="{esc(supervisor_sign_href)}">Sign</a>'
+    elif supervisor_image:
         supervisor_line = f"{supervisor_image}<span class='sig-name'>{esc(record.get('supervisor_name', ''))}</span>"
     else:
         supervisor_line = esc(record.get("supervisor_name", "")) or "________"
@@ -782,8 +857,6 @@ def editor_page(user: dict, record: dict, errors: list[str], csrf: str) -> str:
           <button class="secondary" name="action" value="rebuild" type="submit">Refill weekdays 9.00AM–5.00PM</button>
         </div>
       </form>
-      {SIGN_SCRIPT}
-      <script>attachPad("employee-pad", "employee_signature", "sheet-form");</script>
     </div>
     """
     return render_page("Time sheet", body, user)
@@ -799,20 +872,12 @@ def detail_page(user: dict, record: dict, csrf: str, error: str = "") -> str:
     if record.get("return_note") and record["status"] == "returned":
         note = f"<div class='warnbox'>Returned: {esc(record['return_note'])}</div>"
     controls = f"<div class='error no-print'>{esc(error)}</div>" if error else ""
-    if user["role"] == "supervisor" and record["status"] == "submitted":
+    sign_href = ""
+    if can(user, "approve") and record["status"] == "submitted" and record.get("supervisor_sign_method") != "digital":
+        sign_href = f"/sheet/{record['id']}/sign"
+    if can(user, "approve") and record["status"] == "submitted":
         controls += f"""
         <div class="no-print">
-          <form id="approve-form" method="post" action="/sheet/{record['id']}/approve">
-            <input type="hidden" name="csrf" value="{esc(csrf)}">
-            <label for="signature_name">Name to record on the supervisor line</label>
-            <input id="signature_name" name="signature_name" type="text" value="{esc(user['name'])}" required>
-            {signature_pad("supervisor-pad", "supervisor_signature", "Draw your approval signature")}
-            <div class="actions">
-              <button class="primary" type="submit">Approve</button>
-            </div>
-          </form>
-          {SIGN_SCRIPT}
-          <script>attachPad("supervisor-pad", "supervisor_signature", "approve-form");</script>
           <form method="post" action="/sheet/{record['id']}/return">
             <input type="hidden" name="csrf" value="{esc(csrf)}">
             <label for="note">Note if you are sending it back</label>
@@ -821,18 +886,120 @@ def detail_page(user: dict, record: dict, csrf: str, error: str = "") -> str:
           </form>
         </div>
         """
-    elif user["role"] == "employee" and record["status"] == "returned":
+    elif can(user, "submit") and record["employee_id"] == user["id"] and record["status"] == "returned":
         controls = f"<p class='no-print'><a class='button' href='/sheet/{record['id']}/edit'>Edit and submit again</a></p>"
     body = f"""
     <div class="paper">
       <p class="no-print">{status_badge(record['status'])} <a class="button" href="/sheet/{record['id']}/pdf">Download PDF</a></p>
       {note}
       <div class="no-print">{pattern_box(issues)}</div>
-      {paper_block(record, False)}
+      {paper_block(record, False, sign_href)}
       {controls}
     </div>
     """
     return render_page("Time sheet", body, user)
+
+
+def signature_page(user: dict, record: dict, csrf: str, role: str) -> str:
+    stamp = digital_signature_html(user["name"], sign_stamp())
+    if role == "supervisor":
+        note = "Signing records this on the supervisor line and approves the time sheet."
+        button = "Sign and approve"
+        back = f"/sheet/{record['id']}"
+    else:
+        note = "Signing records this on the employee line. Submit the time sheet afterward."
+        button = "Sign"
+        back = f"/sheet/{record['id']}/edit"
+    body = f"""
+    <section class="card">
+      <h1>Digital signature</h1>
+      <p>{esc(note)}</p>
+      <div class="sig-preview">{stamp}</div>
+      <form method="post" action="/sheet/{record['id']}/sign">
+        <input type="hidden" name="csrf" value="{esc(csrf)}">
+        <button class="primary" type="submit">{esc(button)}</button>
+      </form>
+      <p><a href="{back}">Back to the time sheet</a></p>
+    </section>
+    """
+    return render_page("Digital signature", body, user)
+
+
+def checked(permissions: list[str], key: str) -> str:
+    return " checked" if key in permissions else ""
+
+
+def permission_choices(permissions: list[str]) -> str:
+    boxes = []
+    for key, label in PERMISSIONS:
+        boxes.append(
+            f"<label class='choice'><input type='checkbox' name='perm_{key}' value='yes'{checked(permissions, key)}> {esc(label)}</label>"
+        )
+    return "".join(boxes)
+
+
+def permissions_from_form(form: dict[str, str]) -> list[str]:
+    return [key for key, _label in PERMISSIONS if form.get(f"perm_{key}") == "yes"]
+
+
+def clean_user_id(value: str) -> str:
+    return value.strip().lower()
+
+
+def admin_page(user: dict, error: str = "", notice: str = "", draft: dict | None = None) -> str:
+    draft = draft or {}
+    db = read_db()
+    message = f"<div class='error'>{esc(error)}</div>" if error else ""
+    if notice == "created":
+        message = "<div class='ok'>User id created.</div>"
+    elif notice == "saved":
+        message = "<div class='ok'>Permissions saved.</div>"
+    rows = []
+    for account in db["users"]:
+        shown = draft if draft.get("id") == account["id"] else account
+        rows.append(
+            "<tr>"
+            f"<td><code>{esc(account['id'])}</code></td>"
+            "<td>"
+            f"<form method='post' action='/admin/users/{esc(account['id'])}'>"
+            f"<input type='hidden' name='csrf' value='{esc(user.get('_csrf', ''))}'>"
+            f"<label for='name-{esc(account['id'])}'>Name</label>"
+            f"<input id='name-{esc(account['id'])}' name='name' type='text' value='{esc(shown.get('name', ''))}' required>"
+            "<label>Permissions</label>"
+            f"<div>{permission_choices(permissions_of(shown))}</div>"
+            f"<label for='password-{esc(account['id'])}'>New password</label>"
+            f"<input id='password-{esc(account['id'])}' name='password' type='password' autocomplete='new-password' placeholder='Leave blank to keep the current password'>"
+            "<button class='primary' type='submit'>Save</button>"
+            "</form>"
+            "</td>"
+            "</tr>"
+        )
+    create_permissions = permissions_of(draft) if draft.get("id") == "" else ["submit"]
+    body = f"""
+    <h1>Users</h1>
+    <p class="muted">Create a user id and choose what that person can do. Submit files a time sheet. Review and approve signs off. Manage users opens this page.</p>
+    {message}
+    <section class="panel">
+      <h2>New user</h2>
+      <form method="post" action="/admin/users">
+        <input type="hidden" name="csrf" value="{esc(user.get('_csrf', ''))}">
+        <label for="new-id">User id</label>
+        <input id="new-id" name="user_id" type="text" value="{esc(draft.get('user_id', ''))}" autocomplete="off" required>
+        <label for="new-name">Name</label>
+        <input id="new-name" name="name" type="text" value="{esc(draft.get('name', '') if draft.get('id') == '' else '')}" required>
+        <label for="new-password">Password</label>
+        <input id="new-password" name="password" type="password" autocomplete="new-password" required>
+        <label>Permissions</label>
+        <div>{permission_choices(create_permissions)}</div>
+        <button class="primary" type="submit">Create user</button>
+      </form>
+    </section>
+    <table class="list">
+      <thead><tr><th>User id</th><th>Permissions</th></tr></thead>
+      <tbody>{''.join(rows)}</tbody>
+    </table>
+    """
+    return render_page("Users", body, user)
 
 
 class App(BaseHTTPRequestHandler):
@@ -857,7 +1024,7 @@ class App(BaseHTTPRequestHandler):
                 return
             if path == "/" and method == "GET":
                 if user:
-                    self.redirect("/queue" if user["role"] == "supervisor" else "/home")
+                    self.redirect(landing(user))
                 else:
                     self.respond(login_page())
                 return
@@ -879,6 +1046,12 @@ class App(BaseHTTPRequestHandler):
             if path == "/queue" and method == "GET":
                 self.queue(user)
                 return
+            if path == "/admin" and method == "GET":
+                self.show_admin(user)
+                return
+            if path == "/admin/users" and method == "POST":
+                self.create_account(user, form)
+                return
             if path == "/sheet/new" and method == "GET":
                 self.new_sheet(user)
                 return
@@ -886,6 +1059,9 @@ class App(BaseHTTPRequestHandler):
                 self.save_sheet(user, form, None)
                 return
             parts = path.strip("/").split("/")
+            if len(parts) == 3 and parts[0] == "admin" and parts[1] == "users" and method == "POST":
+                self.update_account(user, form, parts[2])
+                return
             if len(parts) >= 2 and parts[0] == "sheet" and parts[1].isdigit():
                 sheet_id = int(parts[1])
                 action = parts[2] if len(parts) > 2 else ""
@@ -894,6 +1070,12 @@ class App(BaseHTTPRequestHandler):
                     return
                 if method == "GET" and action == "edit":
                     self.edit_sheet(user, sheet_id)
+                    return
+                if action == "sign" and method == "GET":
+                    self.show_signature(user, sheet_id)
+                    return
+                if action == "sign" and method == "POST":
+                    self.apply_signature(user, sheet_id)
                     return
                 if method == "GET" and action == "pdf":
                     self.download_sheet(user, sheet_id)
@@ -968,7 +1150,7 @@ class App(BaseHTTPRequestHandler):
         if not user or not check_password(user["password"], password):
             self.respond(login_page("Username or password is incorrect."), 401)
             return
-        self.redirect("/queue" if user["role"] == "supervisor" else "/home", self.set_session(user["id"]))
+        self.redirect(landing(user), self.set_session(user["id"]))
 
     def logout(self, user: dict | None, form: dict[str, str]) -> None:
         cookie = SimpleCookie(self.headers.get("Cookie"))
@@ -983,28 +1165,123 @@ class App(BaseHTTPRequestHandler):
         sheet = find_sheet(read_db(), sheet_id)
         if not sheet:
             return None
-        if user["role"] == "employee" and sheet["employee_id"] != user["id"]:
-            return None
-        return sheet
+        if can(user, "approve"):
+            return sheet
+        if can(user, "submit") and sheet["employee_id"] == user["id"]:
+            return sheet
+        return None
 
     def home(self, user: dict) -> None:
-        if user["role"] != "employee":
-            self.redirect("/queue")
+        if not can(user, "submit"):
+            target = landing(user)
+            if target == "/home":
+                self.respond(render_page("No access", "<div class='card'><p>This account cannot submit time sheets.</p></div>", user))
+            else:
+                self.redirect(target)
             return
         sheets = [sheet for sheet in read_db()["sheets"] if sheet["employee_id"] == user["id"]]
         self.respond(home_page(user, list(reversed(sheets))))
 
     def queue(self, user: dict) -> None:
-        if user["role"] != "supervisor":
-            self.redirect("/home")
+        if not can(user, "approve"):
+            self.redirect(landing(user))
             return
         order = {"submitted": 0, "returned": 1, "approved": 2}
-        sheets = sorted(read_db()["sheets"], key=lambda sheet: (order.get(sheet["status"], 9), -sheet["id"]))
+        sheets = sorted(
+            (sheet for sheet in read_db()["sheets"] if sheet["status"] != "draft"),
+            key=lambda sheet: (order.get(sheet["status"], 9), -sheet["id"]),
+        )
         self.respond(queue_page(user, sheets))
 
+    def show_admin(self, user: dict) -> None:
+        if not can(user, "manage"):
+            self.redirect(landing(user))
+            return
+        notice = parse_qs(urlparse(self.path).query).get("notice", [""])[0]
+        if notice not in {"created", "saved"}:
+            notice = ""
+        self.respond(admin_page(user, notice=notice))
+
+    def create_account(self, user: dict, form: dict[str, str]) -> None:
+        if not can(user, "manage"):
+            self.respond(render_page("Not allowed", "<div class='card'>Only an admin can create users.</div>", user), 403)
+            return
+        user_id = clean_user_id(form.get("user_id", ""))
+        name = form.get("name", "").strip()
+        password = form.get("password", "")
+        permissions = permissions_from_form(form)
+        errors: list[str] = []
+        if not USER_ID.fullmatch(user_id):
+            errors.append("User id must start with a letter and use only letters, numbers, dots, underscores, or hyphens.")
+        if not name or len(name) > 80:
+            errors.append("Name is required.")
+        if len(password) < 4:
+            errors.append("Password must be at least 4 characters.")
+        if not permissions:
+            errors.append("Choose at least one permission.")
+        if user_id and find_user(read_db(), user_id):
+            errors.append("That user id already exists.")
+        draft = {"id": "", "user_id": user_id, "name": name, "permissions": permissions}
+        if errors:
+            self.respond(admin_page(user, error=" ".join(errors), draft=draft))
+            return
+
+        def add(db: dict) -> None:
+            if find_user(db, user_id):
+                return
+            db["users"].append(make_user(user_id, name, password, permissions))
+
+        mutate_db(add)
+        self.redirect("/admin?notice=created")
+
+    def update_account(self, user: dict, form: dict[str, str], user_id: str) -> None:
+        if not can(user, "manage"):
+            self.respond(render_page("Not allowed", "<div class='card'>Only an admin can change permissions.</div>", user), 403)
+            return
+        user_id = clean_user_id(user_id)
+        if not find_user(read_db(), user_id):
+            self.redirect("/admin")
+            return
+        name = form.get("name", "").strip()
+        password = form.get("password", "")
+        permissions = permissions_from_form(form)
+        errors: list[str] = []
+        if not name or len(name) > 80:
+            errors.append("Name is required.")
+        if password and len(password) < 4:
+            errors.append("Password must be at least 4 characters.")
+        if not permissions:
+            errors.append("Choose at least one permission.")
+        draft = {"id": user_id, "name": name, "permissions": permissions}
+        if errors:
+            self.respond(admin_page(user, error=" ".join(errors), draft=draft))
+            return
+        blocked = {"error": ""}
+
+        def change(db: dict) -> None:
+            account = find_user(db, user_id)
+            if not account:
+                blocked["error"] = "That user id was not found."
+                return
+            others = [item for item in db["users"] if item["id"] != user_id and can(item, "manage")]
+            if "manage" not in permissions and not others:
+                blocked["error"] = "Keep at least one user who can manage users."
+                return
+            account["name"] = name
+            account["permissions"] = permissions
+            account["role"] = role_name(permissions)
+            if password:
+                account["password"] = hash_password(password)
+
+        mutate_db(change)
+        if blocked["error"]:
+            self.respond(admin_page(user, error=blocked["error"], draft=draft))
+            return
+        self.redirect("/admin?notice=saved")
+
     def new_sheet(self, user: dict) -> None:
-        if user["role"] != "employee":
-            self.redirect("/queue")
+        if not can(user, "submit"):
+            self.redirect(landing(user))
             return
         today = date.today()
         record = new_record(user, today, sunday_on_or_before(today))
@@ -1012,19 +1289,19 @@ class App(BaseHTTPRequestHandler):
 
     def edit_sheet(self, user: dict, sheet_id: int) -> None:
         sheet = self.visible_sheet(user, sheet_id)
-        if not sheet or user["role"] != "employee" or sheet["status"] != "returned":
-            self.redirect("/home")
+        if not sheet or not can(user, "submit") or sheet["employee_id"] != user["id"] or sheet["status"] not in {"draft", "returned"}:
+            self.redirect(landing(user))
             return
         self.respond(editor_page(user, sheet, [], user["_csrf"]))
 
     def save_sheet(self, user: dict, form: dict[str, str], sheet_id: int | None) -> None:
-        if user["role"] != "employee":
+        if not can(user, "submit"):
             self.respond(render_page("Not allowed", "<div class='card'>Only an employee can submit a time sheet.</div>", user), 403)
             return
         existing = None
         if sheet_id is not None:
             existing = self.visible_sheet(user, sheet_id)
-            if not existing or existing["status"] != "returned":
+            if not existing or existing["status"] not in {"draft", "returned"}:
                 self.redirect("/home")
                 return
         record, errors = record_from_post(form, user, existing)
@@ -1033,8 +1310,11 @@ class App(BaseHTTPRequestHandler):
                 record["id"] = existing["id"]
             self.respond(editor_page(user, record, [] if form.get("action") == "rebuild" else errors, user["_csrf"]))
             return
-        record["status"] = "submitted"
-        record["return_note"] = ""
+        if form.get("action") == "sign":
+            record["status"] = "returned" if existing and existing["status"] == "returned" else "draft"
+        else:
+            record["status"] = "submitted"
+            record["return_note"] = ""
 
         def save(db: dict) -> None:
             if existing:
@@ -1048,12 +1328,52 @@ class App(BaseHTTPRequestHandler):
                 db["sheets"].append(record)
 
         mutate_db(save)
+        if form.get("action") == "sign":
+            self.redirect(f"/sheet/{record['id']}/sign")
+            return
         self.redirect(f"/sheet/{record['id']}")
+
+    def show_signature(self, user: dict, sheet_id: int) -> None:
+        sheet = self.visible_sheet(user, sheet_id)
+        if not sheet:
+            self.redirect(landing(user))
+            return
+        if can(user, "submit") and sheet["employee_id"] == user["id"] and sheet["status"] in {"draft", "returned"}:
+            self.respond(signature_page(user, sheet, user["_csrf"], "employee"))
+            return
+        if can(user, "approve") and sheet["status"] == "submitted":
+            self.respond(signature_page(user, sheet, user["_csrf"], "supervisor"))
+            return
+        self.redirect(f"/sheet/{sheet_id}")
+
+    def apply_signature(self, user: dict, sheet_id: int) -> None:
+        sheet = find_sheet(read_db(), sheet_id)
+        if not sheet:
+            self.redirect(landing(user))
+            return
+        if can(user, "submit") and sheet["employee_id"] == user["id"] and sheet["status"] in {"draft", "returned"}:
+            signed_at = sign_stamp()
+
+            def sign_employee(db: dict) -> None:
+                stored = find_sheet(db, sheet_id)
+                if stored and stored["employee_id"] == user["id"] and stored["status"] in {"draft", "returned"}:
+                    stored["employee_signature"] = ""
+                    stored["employee_sign_method"] = "digital"
+                    stored["employee_sign_date"] = date.today().isoformat()
+                    stored["employee_signed_at"] = signed_at
+
+            mutate_db(sign_employee)
+            self.redirect(f"/sheet/{sheet_id}/edit")
+            return
+        if can(user, "approve") and sheet["status"] == "submitted":
+            self.approve_sheet(user, {"signature_name": user["name"]}, sheet_id)
+            return
+        self.redirect(f"/sheet/{sheet_id}")
 
     def download_sheet(self, user: dict, sheet_id: int) -> None:
         sheet = self.visible_sheet(user, sheet_id)
         if not sheet:
-            self.redirect("/home" if user["role"] == "employee" else "/queue")
+            self.redirect(landing(user))
             return
         try:
             pdf, filename = sheet_pdf(sheet)
@@ -1074,22 +1394,24 @@ class App(BaseHTTPRequestHandler):
     def view_sheet(self, user: dict, sheet_id: int) -> None:
         sheet = self.visible_sheet(user, sheet_id)
         if not sheet:
-            self.redirect("/home" if user["role"] == "employee" else "/queue")
+            self.redirect(landing(user))
+            return
+        if sheet["status"] == "draft" and sheet["employee_id"] == user["id"] and can(user, "submit"):
+            self.redirect(f"/sheet/{sheet_id}/edit")
             return
         self.respond(detail_page(user, sheet, user["_csrf"]))
 
     def approve_sheet(self, user: dict, form: dict[str, str], sheet_id: int) -> None:
-        if user["role"] != "supervisor":
+        if not can(user, "approve"):
             self.respond(render_page("Not allowed", "<div class='card'>Only a supervisor can approve a time sheet.</div>", user), 403)
             return
-        signature = form.get("signature_name", "").strip()
-        image = clean_signature(form.get("supervisor_signature", ""))
+        signature = user["name"].strip()
         sheet = find_sheet(read_db(), sheet_id)
         if not sheet or sheet["status"] != "submitted":
             self.redirect("/queue")
             return
-        if not signature or not image:
-            self.respond(detail_page(user, sheet, user["_csrf"], "Draw your signature and enter your name."))
+        if not signature:
+            self.respond(detail_page(user, sheet, user["_csrf"], "This account needs a name before it can approve."))
             return
 
         def approve(db: dict) -> None:
@@ -1098,14 +1420,16 @@ class App(BaseHTTPRequestHandler):
                 stored["status"] = "approved"
                 stored["supervisor_name"] = signature
                 stored["supervisor_date"] = date.today().isoformat()
-                stored["supervisor_signature"] = image
+                stored["supervisor_signature"] = ""
+                stored["supervisor_sign_method"] = "digital"
+                stored["supervisor_signed_at"] = sign_stamp()
                 stored["supervisor_id"] = user["id"]
 
         mutate_db(approve)
         self.redirect(f"/sheet/{sheet_id}")
 
     def return_sheet(self, user: dict, form: dict[str, str], sheet_id: int) -> None:
-        if user["role"] != "supervisor":
+        if not can(user, "approve"):
             self.respond(render_page("Not allowed", "<div class='card'>Only a supervisor can return a time sheet.</div>", user), 403)
             return
         note = form.get("note", "").strip() or "Please correct this time sheet."
@@ -1118,6 +1442,8 @@ class App(BaseHTTPRequestHandler):
                 stored["supervisor_name"] = ""
                 stored["supervisor_date"] = ""
                 stored["supervisor_signature"] = ""
+                stored["supervisor_sign_method"] = ""
+                stored["supervisor_signed_at"] = ""
 
         mutate_db(send_back)
         self.redirect(f"/sheet/{sheet_id}")
@@ -1141,6 +1467,7 @@ def main() -> None:
     print(f"Time sheet site: http://{HOST}:{PORT}")
     print(f"Employee login: divya / {EMPLOYEE_PASSWORD}")
     print(f"Supervisor login: supervisor / {SUPERVISOR_PASSWORD}")
+    print(f"Admin login: admin / {ADMIN_PASSWORD}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

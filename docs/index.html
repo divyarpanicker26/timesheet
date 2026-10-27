@@ -40,7 +40,10 @@
   .badge { font-weight: 700; }
   .badge.submitted { color: #1a4f8b; }
   .badge.approved { color: #146c2e; }
+  .badge.draft { color: #526074; }
   .badge.returned { color: #9b1c1c; }
+  .sign-btn { display: inline-block; margin: 0 4px 2px; padding: 1px 8px; border: 0; border-radius: 3px; background: #c2410c; color: white; font-family: "Segoe UI", Calibri, sans-serif; font-size: 11px; font-weight: 700; line-height: 1.4; cursor: pointer; text-decoration: none; vertical-align: middle; }
+  .sig-preview { margin: 18px 0; padding: 16px; background: white; border: 1px solid #d5deea; border-radius: 8px; }
   .paper { padding: 28px 32px 36px; font-family: "Times New Roman", Times, serif; }
   .paper h1, .paper h2 { text-align: center; margin: 0; letter-spacing: .02em; }
   .paper h1 { font-size: 22px; }
@@ -59,10 +62,13 @@
   .sign { width: 100%; margin-top: 14px; }
   .sign td { padding: 7px 8px 7px 0; vertical-align: bottom; }
   .line { border-bottom: 1px solid #222; min-width: 220px; display: inline-block; padding: 0 6px; }
-  canvas.pad { width: min(520px, 100%); height: 140px; border: 1px solid #222; border-radius: 8px; background: #fff; touch-action: none; cursor: crosshair; }
+  table.sign td:first-child { width: 74%; }
   img.signature { height: 52px; vertical-align: middle; }
   .sig-name { margin-left: 8px; }
-  .pad-error { color: #9b1c1c; margin: 6px 0 0; }
+  .sig-block { display: inline-flex; align-items: center; gap: 10px; vertical-align: bottom; white-space: nowrap; }
+  .sig-script { font-family: "Segoe Script", "Brush Script MT", "Lucida Handwriting", cursive; font-size: 26px; font-weight: 700; line-height: 1; color: #111; white-space: nowrap; }
+  .sig-stamp { display: inline-flex; flex-direction: column; font-family: "Segoe UI", Calibri, sans-serif; font-size: 10px; line-height: 1.15; color: #111; }
+  .sig-stamp span { white-space: nowrap; }
   .fine { font-size: 12px; }
   .actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
   .check { font-weight: 400; }
@@ -218,7 +224,7 @@ function review(record) {
   return issues;
 }
 function statusBadge(status) {
-  const label = { submitted: "Waiting for supervisor", approved: "Approved", returned: "Returned" }[status] || status;
+  const label = { draft: "Not submitted", submitted: "Waiting for supervisor", approved: "Approved", returned: "Returned" }[status] || status;
   return "<span class='badge " + esc(status) + "'>" + esc(label) + "</span>";
 }
 function patternBox(issues) {
@@ -252,14 +258,48 @@ function field(name, label, value, type, editable) {
   const shown = type === "date" && value ? formatDate(value) : value;
   return "<div><strong>" + label + "</strong> " + (esc(shown) || "________") + "</div>";
 }
-function paperBlock(record, editable) {
-  const signed = ["submitted", "approved", "returned"].includes(record.status);
+function signedNow() {
+  const moment = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const offset = -moment.getTimezoneOffset();
+  const sign = offset >= 0 ? "+" : "-";
+  const abs = Math.abs(offset);
+  return moment.getFullYear() + "-" + pad(moment.getMonth() + 1) + "-" + pad(moment.getDate())
+    + "T" + pad(moment.getHours()) + ":" + pad(moment.getMinutes()) + ":" + pad(moment.getSeconds())
+    + sign + pad(Math.floor(abs / 60)) + ":" + pad(abs % 60);
+}
+function stampText(value) {
+  if (!value) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value.replace(/-/g, ".");
+  const moment = new Date(value);
+  if (Number.isNaN(moment.getTime())) return value;
+  const pad = (n) => String(n).padStart(2, "0");
+  const offset = -moment.getTimezoneOffset();
+  const sign = offset >= 0 ? "+" : "-";
+  const abs = Math.abs(offset);
+  return moment.getFullYear() + "." + pad(moment.getMonth() + 1) + "." + pad(moment.getDate())
+    + " " + pad(moment.getHours()) + ":" + pad(moment.getMinutes()) + ":" + pad(moment.getSeconds())
+    + " " + sign + pad(Math.floor(abs / 60)) + "'" + pad(abs % 60) + "'";
+}
+function digitalLine(name, when) {
+  const stamp = stampText(when);
+  const dateLine = stamp ? "<span>Date: " + esc(stamp) + "</span>" : "";
+  return "<span class='sig-block'><span class='sig-script'>" + esc(name) + "</span><span class='sig-stamp'><span>Digitally signed by " + esc(name) + "</span>" + dateLine + "</span></span>";
+}
+function paperBlock(record, editable, signHref) {
+  const signed = ["submitted", "approved", "returned"].includes(record.status) || (record.employee_sign_method === "digital" && record.employee_signed_at);
   let employeeLine = "________";
-  if (editable) employeeLine = "<div class='no-print'><div>Draw your signature</div><canvas class='pad' id='employee-pad' width='520' height='140'></canvas><div><button type='button' class='secondary' id='employee-pad-clear'>Clear</button></div><p class='pad-error' id='employee-pad-error' hidden>Draw your signature before continuing.</p></div>";
+  if (editable && record.employee_sign_method === "digital" && record.employee_signed_at) employeeLine = digitalLine(record.employee_name, record.employee_signed_at || record.employee_sign_date);
+  else if (editable) employeeLine = "<button class='sign-btn no-print' name='action' value='sign' type='submit'>Sign</button>";
+  else if (record.employee_sign_method === "digital") employeeLine = digitalLine(record.employee_name, record.employee_signed_at || record.employee_sign_date);
   else if (signatureImage(record.employee_signature)) employeeLine = signatureImage(record.employee_signature) + "<span class='sig-name'>" + esc(record.employee_name) + "</span>";
   else if (signed) employeeLine = esc(record.employee_name);
   const supervisorImage = signatureImage(record.supervisor_signature);
-  const supervisorLine = supervisorImage
+  const supervisorLine = record.supervisor_sign_method === "digital" && record.supervisor_name
+    ? digitalLine(record.supervisor_name, record.supervisor_signed_at || record.supervisor_date)
+    : signHref
+    ? "<button type='button' class='sign-btn no-print' data-go='" + signHref + "'>Sign</button>"
+    : supervisorImage
     ? supervisorImage + "<span class='sig-name'>" + esc(record.supervisor_name) + "</span>"
     : (esc(record.supervisor_name) || "________");
   const reason = editable ? "<textarea name='reason'>" + esc(record.reason || "") + "</textarea>" : (esc(record.reason) || "________");
@@ -308,7 +348,7 @@ function homePage(user) {
 }
 function queuePage(user) {
   const order = { submitted: 0, returned: 1, approved: 2 };
-  const sheets = db.sheets.slice().sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9) || b.id - a.id);
+  const sheets = db.sheets.filter((sheet) => sheet.status !== "draft").slice().sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9) || b.id - a.id);
   const rows = sheets.map((sheet) => {
     const pattern = review(sheet).length ? "Needs correction" : "Matches";
     return "<tr><td>" + esc(sheet.employee_name) + "</td><td>" + esc(formatDate(sheet.form_date)) + "</td><td>" + pattern + "</td><td>" + statusBadge(sheet.status) + "</td><td><button type='button' data-go='#/sheet/" + sheet.id + "'>Review</button> · <button type='button' data-print='" + sheet.id + "'>Download PDF</button></td></tr>";
@@ -335,12 +375,13 @@ function detailPage(user, record, error) {
   const issues = review(record);
   const note = record.return_note && record.status === "returned" ? "<div class='warnbox'>Returned: " + esc(record.return_note) + "</div>" : "";
   let controls = error ? "<div class='error no-print'>" + esc(error) + "</div>" : "";
+  const signHref = can(user, "approve") && record.status === "submitted" && record.supervisor_sign_method !== "digital" ? "#/sheet/" + record.id + "/sign" : "";
   if (can(user, "approve") && record.status === "submitted") {
-    controls += "<div class='no-print'><form id='approve-form' data-id='" + record.id + "'><label for='signature_name'>Name to record on the supervisor line</label><input id='signature_name' name='signature_name' type='text' value='" + esc(user.name) + "' required><div>Draw your approval signature</div><canvas class='pad' id='supervisor-pad' width='520' height='140'></canvas><div><button type='button' class='secondary' id='supervisor-pad-clear'>Clear</button></div><p class='pad-error' id='supervisor-pad-error' hidden>Draw your signature before continuing.</p><div class='actions'><button class='primary' type='submit'>Approve</button></div></form><form id='return-form' data-id='" + record.id + "'><label for='note'>Note if you are sending it back</label><textarea id='note' name='note' placeholder='What needs to change'></textarea><button class='warn' type='submit'>Return to employee</button></form></div>";
+    controls += "<div class='no-print'><form id='return-form' data-id='" + record.id + "'><label for='note'>Note if you are sending it back</label><textarea id='note' name='note' placeholder='What needs to change'></textarea><button class='warn' type='submit'>Return to employee</button></form></div>";
   } else if (can(user, "submit") && record.employee_id === user.id && record.status === "returned") {
     controls = "<p class='no-print'><button class='primary' type='button' data-go='#/sheet/" + record.id + "/edit'>Edit and submit again</button></p>";
   }
-  return page(user, "<div class='paper'><p class='no-print'>" + statusBadge(record.status) + " <button class='primary' type='button' id='print-sheet'>Download PDF</button></p>" + note + patternBox(issues) + paperBlock(record, false) + controls + "</div>");
+  return page(user, "<div class='paper'><p class='no-print'>" + statusBadge(record.status) + " <button class='primary' type='button' id='print-sheet'>Download PDF</button></p>" + note + patternBox(issues) + paperBlock(record, false, signHref) + controls + "</div>");
 }
 function readWeeks(form) {
   const weeks = blankWeeks();
@@ -356,34 +397,17 @@ function valueOf(form, name) {
 function selectedPermissions(form) {
   return PERMS.map(([key]) => key).filter((key) => form.elements["perm_" + key] && form.elements["perm_" + key].checked);
 }
-function blankCanvas(canvas) {
-  const probe = document.createElement("canvas");
-  probe.width = canvas.width;
-  probe.height = canvas.height;
-  return canvas.toDataURL() === probe.toDataURL();
-}
-function attachPad(canvasId) {
-  const canvas = document.getElementById(canvasId);
-  if (!canvas) return;
-  const context = canvas.getContext("2d");
-  context.lineWidth = 2.4;
-  context.lineCap = "round";
-  context.lineJoin = "round";
-  context.strokeStyle = "#142033";
-  let drawing = false;
-  function point(event) {
-    const rect = canvas.getBoundingClientRect();
-    const source = event.touches ? event.touches[0] : event;
-    return { x: (source.clientX - rect.left) * canvas.width / rect.width, y: (source.clientY - rect.top) * canvas.height / rect.height };
-  }
-  canvas.addEventListener("mousedown", (event) => { drawing = true; const p = point(event); context.beginPath(); context.moveTo(p.x, p.y); });
-  canvas.addEventListener("mousemove", (event) => { if (!drawing) return; const p = point(event); context.lineTo(p.x, p.y); context.stroke(); });
-  window.addEventListener("mouseup", () => { drawing = false; });
-  canvas.addEventListener("touchstart", (event) => { drawing = true; const p = point(event); context.beginPath(); context.moveTo(p.x, p.y); event.preventDefault(); }, { passive: false });
-  canvas.addEventListener("touchmove", (event) => { if (!drawing) return; const p = point(event); context.lineTo(p.x, p.y); context.stroke(); event.preventDefault(); }, { passive: false });
-  canvas.addEventListener("touchend", () => { drawing = false; });
-  const clear = document.getElementById(canvasId + "-clear");
-  if (clear) clear.addEventListener("click", () => context.clearRect(0, 0, canvas.width, canvas.height));
+function signaturePage(user, record) {
+  const employee = can(user, "submit") && record.employee_id === user.id && (record.status === "draft" || record.status === "returned");
+  const supervisor = can(user, "approve") && record.status === "submitted";
+  if (!employee && !supervisor) return page(user, "<div class='card'>This time sheet cannot be signed.</div>");
+  const role = employee ? "employee" : "supervisor";
+  const note = role === "supervisor"
+    ? "Signing records this on the supervisor line and approves the time sheet."
+    : "Signing records this on the employee line. Submit the time sheet afterward.";
+  const back = role === "supervisor" ? "#/sheet/" + record.id : "#/sheet/" + record.id + "/edit";
+  const button = role === "supervisor" ? "Sign and approve" : "Sign";
+  return page(user, "<section class='card'><h1>Digital signature</h1><p>" + esc(note) + "</p><div class='sig-preview'>" + digitalLine(user.name, signedNow()) + "</div><form id='sign-form' data-id='" + record.id + "' data-role='" + role + "'><button class='primary' type='submit'>" + button + "</button></form><p><button type='button' data-go='" + back + "'>Back to the time sheet</button></p></section>");
 }
 function go(hash) { location.hash = hash; }
 function findSheet(id) { return db.sheets.find((sheet) => sheet.id === Number(id)); }
@@ -419,21 +443,24 @@ function render() {
     html = can(user, "manage") ? adminPage(user, "", "") : page(user, "<div class='card'>Only an admin can manage users.</div>");
   } else if (parts[0] === "sheet" && parts[1] === "new") {
     html = can(user, "submit") ? editorPage(user, todayRecord(user), []) : page(user, "<div class='card'>Only an employee can submit a time sheet.</div>");
+  } else if (parts[0] === "sheet" && parts[2] === "sign") {
+    const sheet = visible(user, findSheet(parts[1]));
+    html = sheet ? signaturePage(user, sheet) : page(user, "<div class='card'>That time sheet is not available.</div>");
   } else if (parts[0] === "sheet" && parts[2] === "edit") {
     const sheet = visible(user, findSheet(parts[1]));
-    html = sheet && can(user, "submit") && sheet.employee_id === user.id && sheet.status === "returned"
+    html = sheet && can(user, "submit") && sheet.employee_id === user.id && (sheet.status === "returned" || sheet.status === "draft")
       ? editorPage(user, sheet, [])
       : page(user, "<div class='card'>This time sheet cannot be edited.</div>");
   } else if (parts[0] === "sheet" && parts[1]) {
     const sheet = visible(user, findSheet(parts[1]));
-    html = sheet ? detailPage(user, sheet, "") : page(user, "<div class='card'>That time sheet is not available.</div>");
+    html = sheet && sheet.status === "draft" && can(user, "submit") && sheet.employee_id === user.id
+      ? editorPage(user, sheet, [])
+      : sheet ? detailPage(user, sheet, "") : page(user, "<div class='card'>That time sheet is not available.</div>");
   } else {
     go(landing(user));
     return;
   }
   document.getElementById("app").innerHTML = html;
-  attachPad("employee-pad");
-  attachPad("supervisor-pad");
   const print = document.getElementById("print-sheet");
   if (print) print.addEventListener("click", () => window.print());
 }
@@ -462,6 +489,7 @@ document.getElementById("app").addEventListener("submit", (event) => {
   }
   if (!user) { go("#/"); return; }
   if (form.id === "sheet-form") saveSheet(user, form, event.submitter);
+  if (form.id === "sign-form") applySignPage(user, form);
   if (form.id === "approve-form") approveSheet(user, form);
   if (form.id === "return-form") returnSheet(user, form);
   if (form.id === "create-user") createUser(user, form);
@@ -494,14 +522,19 @@ function saveSheet(user, form, submitter) {
   if (action === "rebuild" && formDate && periodStart && periodStart.getDay() === 0) record.weeks = buildWeeks(formDate, periodStart);
   else record.weeks = readWeeks(form);
   if (action === "submit" && !form.elements.certify.checked) errors.push("Check the certification box before submitting.");
-  const pad = document.getElementById("employee-pad");
-  if (action === "submit" && (!pad || blankCanvas(pad))) errors.push("Draw your signature before submitting.");
-  if (action === "rebuild" || errors.length) {
-    document.getElementById("app").innerHTML = editorPage(user, record, action === "rebuild" ? [] : errors);
-    attachPad("employee-pad");
+  if (action === "submit" && !(record.employee_sign_method === "digital" && record.employee_signed_at)) errors.push("Use the Sign button before submitting.");
+  if (action === "sign" && !errors.length) {
+    record.status = existing && existing.status === "returned" ? "returned" : "draft";
+    if (existing) Object.assign(existing, record);
+    else { record.id = db.next_id++; db.sheets.push(record); }
+    persist();
+    go("#/sheet/" + record.id + "/sign");
     return;
   }
-  record.employee_signature = pad.toDataURL("image/png");
+  if (action === "rebuild" || errors.length) {
+    document.getElementById("app").innerHTML = editorPage(user, record, action === "rebuild" ? [] : errors);
+    return;
+  }
   record.status = "submitted";
   record.return_note = "";
   if (existing) Object.assign(existing, record);
@@ -509,20 +542,31 @@ function saveSheet(user, form, submitter) {
   persist();
   go("#/sheet/" + record.id);
 }
+function applySignPage(user, form) {
+  const sheet = findSheet(form.dataset.id);
+  if (!sheet) { go("#/home"); return; }
+  if (form.dataset.role === "supervisor") { approveSheet(user, form); return; }
+  if (sheet.employee_id !== user.id || (sheet.status !== "draft" && sheet.status !== "returned")) { go("#/home"); return; }
+  sheet.employee_signature = "";
+  sheet.employee_sign_method = "digital";
+  sheet.employee_sign_date = iso(new Date());
+  sheet.employee_signed_at = signedNow();
+  persist();
+  go("#/sheet/" + sheet.id + "/edit");
+}
 function approveSheet(user, form) {
   const sheet = findSheet(form.dataset.id);
-  const pad = document.getElementById("supervisor-pad");
-  const name = valueOf(form, "signature_name");
   if (!sheet || sheet.status !== "submitted") { go("#/queue"); return; }
-  if (!name || !pad || blankCanvas(pad)) {
-    document.getElementById("app").innerHTML = detailPage(user, sheet, "Draw your signature and enter your name.");
-    attachPad("supervisor-pad");
+  if (!user.name) {
+    document.getElementById("app").innerHTML = detailPage(user, sheet, "This account needs a name before it can approve.");
     return;
   }
   sheet.status = "approved";
-  sheet.supervisor_name = name;
+  sheet.supervisor_name = user.name;
   sheet.supervisor_date = iso(new Date());
-  sheet.supervisor_signature = pad.toDataURL("image/png");
+  sheet.supervisor_signature = "";
+  sheet.supervisor_sign_method = "digital";
+  sheet.supervisor_signed_at = signedNow();
   sheet.supervisor_id = user.id;
   persist();
   go("#/sheet/" + sheet.id);
@@ -536,6 +580,8 @@ function returnSheet(user, form) {
   sheet.supervisor_name = "";
   sheet.supervisor_date = "";
   sheet.supervisor_signature = "";
+  sheet.supervisor_sign_method = "";
+  sheet.supervisor_signed_at = "";
   persist();
   go("#/sheet/" + sheet.id);
   render();

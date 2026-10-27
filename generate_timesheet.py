@@ -74,9 +74,14 @@ class Timesheet:
     finish_time: str
     weeks: tuple[tuple[DayEntry, ...], tuple[DayEntry, ...]]
     employee_signature: str = ""
+    employee_sign_method: str = ""
+    employee_sign_date: date | None = None
+    employee_signed_at: str = ""
     supervisor_name: str = ""
     supervisor_date: date | None = None
     supervisor_signature: str = ""
+    supervisor_sign_method: str = ""
+    supervisor_signed_at: str = ""
     witness: str = ""
 
 
@@ -275,11 +280,21 @@ def render_html(sheet: Timesheet) -> str:
     kronos = html.escape(sheet.kronos_id) or "&nbsp;"
     employee = html.escape(sheet.employee)
     employee_mark = signature_image(sheet.employee_signature)
-    employee_line = f"{employee_mark} {employee}" if employee_mark else employee
+    if sheet.employee_sign_method == "digital":
+        when = sheet.employee_signed_at or (sheet.employee_sign_date.isoformat() if sheet.employee_sign_date else "")
+        employee_line = digital_signature_html(sheet.employee, when)
+    elif employee_mark:
+        employee_line = f"{employee_mark} {employee}"
+    else:
+        employee_line = employee
     witness = html.escape(sheet.witness) if sheet.witness else "<span class='blank'>.</span>"
     supervisor_mark = signature_image(sheet.supervisor_signature)
     supervisor_name = html.escape(sheet.supervisor_name)
-    if supervisor_mark or sheet.supervisor_name:
+    if sheet.supervisor_sign_method == "digital" and sheet.supervisor_name:
+        when = sheet.supervisor_signed_at or (sheet.supervisor_date.isoformat() if sheet.supervisor_date else "")
+        supervisor_line = digital_signature_html(sheet.supervisor_name, when)
+        supervisor_date = html.escape(format_date(sheet.supervisor_date)) or "<span class='blank'>.</span>"
+    elif supervisor_mark or sheet.supervisor_name:
         supervisor_line = f"{supervisor_mark} {supervisor_name}".strip()
         supervisor_date = html.escape(format_date(sheet.supervisor_date)) or "<span class='blank'>.</span>"
     else:
@@ -377,6 +392,30 @@ def render_html(sheet: Timesheet) -> str:
       max-width: 2.2in;
       vertical-align: bottom;
     }}
+    .sig-block {{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      vertical-align: bottom;
+      white-space: nowrap;
+    }}
+    .sig-script {{
+      font-family: "Segoe Script", "Brush Script MT", "Lucida Handwriting", cursive;
+      font-size: 18pt;
+      font-weight: 700;
+      line-height: 1;
+      color: #111;
+      white-space: nowrap;
+    }}
+    .sig-stamp {{
+      display: inline-flex;
+      flex-direction: column;
+      font-family: "Segoe UI", Calibri, sans-serif;
+      font-size: 7pt;
+      line-height: 1.15;
+      color: #111;
+    }}
+    .sig-stamp span {{ white-space: nowrap; }}
   </style>
 </head>
 <body>
@@ -432,6 +471,39 @@ def render_html(sheet: Timesheet) -> str:
 </body>
 </html>
 """
+
+
+def format_signature_stamp(value: str) -> str:
+    """Format a sign time as 2026.10.23 15:10:41 -04'00'."""
+    text = (value or "").strip()
+    if not text:
+        return ""
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+        return date.fromisoformat(text).strftime("%Y.%m.%d")
+    try:
+        moment = datetime.fromisoformat(text)
+    except ValueError:
+        return text
+    local = moment.astimezone()
+    offset = local.strftime("%z")
+    if len(offset) == 5:
+        offset = f"{offset[:3]}'{offset[3:]}'"
+    return local.strftime("%Y.%m.%d %H:%M:%S ") + offset
+
+
+def digital_signature_html(name: str, signed_at: str) -> str:
+    """Script name plus the small digitally-signed stamp."""
+    safe_name = html.escape(name)
+    stamp = html.escape(format_signature_stamp(signed_at))
+    date_line = f"<span>Date: {stamp}</span>" if stamp else ""
+    return (
+        "<span class='sig-block'>"
+        f"<span class='sig-script'>{safe_name}</span>"
+        "<span class='sig-stamp'>"
+        f"<span>Digitally signed by {safe_name}</span>"
+        f"{date_line}"
+        "</span></span>"
+    )
 
 
 def signature_image(data: str) -> str:

@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>NYCHA Time Sheet</title>
+<style>
+  @page { size: 16.6667in 9.375in; margin: 0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #0e1c30; color: #1a1a1a; font-family: "Segoe UI", Calibri, sans-serif; }
+  .slide {
+    width: 1600px;
+    height: 900px;
+    overflow: hidden;
+    background: #f4f7fb;
+    color: #1a1a1a;
+    position: relative;
+  }
+  .nav, .kicker, h1, h2, p, li { margin: 0; }
+  .kicker {
+    color: #17375e;
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+  }
+  h1 { font-size: 64px; line-height: 1.05; letter-spacing: -0.02em; }
+  h2 { font-size: 48px; line-height: 1.1; letter-spacing: -0.02em; }
+  .lede { font-size: 26px; line-height: 1.35; color: #334155; }
+  ul { margin: 28px 0 0; padding: 0; list-style: none; }
+  li { font-size: 24px; line-height: 1.35; margin: 0 0 16px; padding-left: 22px; position: relative; }
+  li::before { content: ""; position: absolute; left: 0; top: 12px; width: 8px; height: 8px; border-radius: 50%; background: #17375e; }
+  .foot {
+    position: absolute; left: 64px; right: 64px; bottom: 36px;
+    display: flex; justify-content: space-between;
+    color: #64748b; font-size: 16px;
+  }
+  .title {
+    background: #17375e; color: white;
+    display: flex; align-items: center; padding: 0 120px;
+  }
+  .title .kicker { color: #d6e2f0; }
+  .title h1 { font-size: 92px; margin: 18px 0 20px; }
+  .title .lede { color: #e7eef6; font-size: 32px; max-width: 980px; }
+  .title .foot { color: #c5d4e6; }
+  .split { display: grid; grid-template-columns: 620px 1fr; height: 100%; }
+  .copy { padding: 72px 48px 80px 64px; }
+  .visual { padding: 56px 56px 72px 0; display: flex; }
+  .shot {
+    width: 100%;
+    background: #e7edf5;
+    border: 1px solid #d5deea;
+    border-radius: 18px;
+    overflow: hidden;
+  }
+  .shot img { width: 100%; height: 100%; object-fit: cover; object-position: top center; display: block; }
+  .shot.sign img { object-position: center 72%; }
+  .shot.admin img { object-position: center 35%; }
+  .roles { padding: 80px 72px 80px; }
+  .roles h1 { margin: 14px 0 36px; }
+  .cards { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px; }
+  .card { background: white; border: 1px solid #d5deea; border-radius: 18px; padding: 28px 28px 32px; }
+  .card strong { display: block; font-size: 28px; margin-bottom: 12px; color: #17375e; }
+  .card p { font-size: 22px; line-height: 1.4; color: #334155; }
+  .run { padding: 88px 100px; }
+  .run h1 { margin: 12px 0 28px; }
+  table { border-collapse: collapse; width: 920px; background: white; border-radius: 16px; overflow: hidden; }
+  th, td { text-align: left; padding: 16px 22px; font-size: 24px; border-bottom: 1px solid #e1e7ef; }
+  th { background: #eef3fb; font-size: 16px; letter-spacing: .08em; text-transform: uppercase; color: #17375e; }
+  code { font-family: Consolas, "Segoe UI", monospace; font-size: 28px; }
+  .hint { display: none; }
+  @media screen {
+    html, body { height: 100%; overflow: hidden; }
+    .slide { display: none; position: absolute; left: 50%; top: 50%; }
+    .slide.active { display: block; }
+  }
+  @media print {
+    html, body { background: white; overflow: visible; }
+    .slide {
+      display: block !important;
+      position: relative !important;
+      left: auto !important;
+      top: auto !important;
+      transform: none !important;
+      break-after: page;
+      page-break-after: always;
+    }
+    .hint { display: none !important; }
+  }
+</style>
+</head>
+<body>
+<section class="slide title active">
+  <div>
+    <div class="kicker">New York City Housing Authority</div>
+    <h1>Time Sheet</h1>
+    <p class="lede">Employees submit hours. Supervisors approve. Admins create user ids and set permissions.</p>
+    <p class="lede" style="margin-top: 28px; font-size: 22px; color: #c5d4e6;">Arrow keys or a click move between slides.</p>
+  </div>
+  <div class="foot"><span>Special Bi-Weekly Alternate Time Sheet</span><span>NYCHA 015.210A</span></div>
+</section>
+
+<section class="slide roles">
+  <div class="kicker">Who uses it</div>
+  <h1>Three sign-ins, three jobs</h1>
+  <div class="cards">
+    <div class="card"><strong>Employee</strong><p>Fills the bi-weekly form, draws a signature, and submits. Sees only their own sheets.</p></div>
+    <div class="card"><strong>Supervisor</strong><p>Reviews every sheet, checks the weekday pattern, and approves or sends it back.</p></div>
+    <div class="card"><strong>Admin</strong><p>Creates user ids and chooses who can submit, approve, or manage users.</p></div>
+  </div>
+  <div class="foot"><span>NYCHA Time Sheet</span><span>2</span></div>
+</section>
+
+<section class="slide">
+  <div class="split">
+    <div class="copy">
+      <div class="kicker">Sign in</div>
+      <h2>Start from one page</h2>
+      <ul>
+        <li>Employee, supervisor, and admin each have a demo sign-in.</li>
+        <li>After sign-in, the page opens on that person’s work.</li>
+        <li>The site runs on this computer at port 8766.</li>
+      </ul>
+    </div>
+    <div class="visual"><div class="shot"><img src="images/login.png" alt="Time sheet sign-in page"></div></div>
+  </div>
+  <div class="foot"><span>NYCHA Time Sheet</span><span>3</span></div>
+</section>
+
+<section class="slide">
+  <div class="split">
+    <div class="copy">
+      <div class="kicker">Employee</div>
+      <h2>My time sheets</h2>
+      <ul>
+        <li>A new sheet is prefilled for the current period.</li>
+        <li>The list shows the pattern and the status.</li>
+        <li>Download PDF is on the list and on the sheet.</li>
+      </ul>
+    </div>
+    <div class="visual"><div class="shot"><img src="images/home.png" alt="Employee list of approved time sheets"></div></div>
+  </div>
+  <div class="foot"><span>NYCHA Time Sheet</span><span>4</span></div>
+</section>
+
+<section class="slide">
+  <div class="split">
+    <div class="copy">
+      <div class="kicker">The form</div>
+      <h2>The weekday pattern</h2>
+      <ul>
+        <li>Weekdays through the form date are 9.00AM–5.00PM.</li>
+        <li>Saturday, Sunday, and future days stay blank.</li>
+        <li>The reason is Approved remote work.</li>
+      </ul>
+    </div>
+    <div class="visual"><div class="shot"><img src="images/sheet.png" alt="Filled bi-weekly time sheet"></div></div>
+  </div>
+  <div class="foot"><span>NYCHA Time Sheet</span><span>5</span></div>
+</section>
+
+<section class="slide">
+  <div class="split">
+    <div class="copy">
+      <div class="kicker">Signatures</div>
+      <h2>Each person signs</h2>
+      <ul>
+        <li>The employee draws a signature to submit.</li>
+        <li>The supervisor draws a signature to approve.</li>
+        <li>The PDF includes both drawings.</li>
+      </ul>
+    </div>
+    <div class="visual"><div class="shot sign"><img src="images/signatures.png" alt="Employee and supervisor signatures on the form"></div></div>
+  </div>
+  <div class="foot"><span>NYCHA Time Sheet</span><span>6</span></div>
+</section>
+
+<section class="slide">
+  <div class="split">
+    <div class="copy">
+      <div class="kicker">Supervisor</div>
+      <h2>Review the queue</h2>
+      <ul>
+        <li>Every employee’s sheet is in one list.</li>
+        <li>Approve records the name, date, and signature.</li>
+        <li>Return sends it back with a note.</li>
+      </ul>
+    </div>
+    <div class="visual"><div class="shot"><img src="images/queue.png" alt="Supervisor queue of time sheets"></div></div>
+  </div>
+  <div class="foot"><span>NYCHA Time Sheet</span><span>7</span></div>
+</section>
+
+<section class="slide">
+  <div class="split">
+    <div class="copy">
+      <div class="kicker">Admin</div>
+      <h2>Users and permissions</h2>
+      <ul>
+        <li>Submit time sheets.</li>
+        <li>Review and approve.</li>
+        <li>Manage users. One person can have more than one.</li>
+      </ul>
+    </div>
+    <div class="visual"><div class="shot admin"><img src="images/admin.png" alt="Admin page for user permissions"></div></div>
+  </div>
+  <div class="foot"><span>NYCHA Time Sheet</span><span>8</span></div>
+</section>
+
+<section class="slide run">
+  <div class="kicker">Try it</div>
+  <h1>Run it locally</h1>
+  <p class="lede" style="margin-bottom: 28px;"><code>python timesheet_app.py</code> &nbsp;&nbsp; then open &nbsp; <code>http://127.0.0.1:8766</code></p>
+  <table>
+    <thead><tr><th>Role</th><th>Username</th><th>Password</th></tr></thead>
+    <tbody>
+      <tr><td>Employee</td><td>divya</td><td>timesheet</td></tr>
+      <tr><td>Supervisor</td><td>supervisor</td><td>approve</td></tr>
+      <tr><td>Admin</td><td>admin</td><td>manage</td></tr>
+    </tbody>
+  </table>
+  <div class="foot"><span>NYCHA Time Sheet</span><span>9</span></div>
+</section>
+
+<div class="hint"><span id="count">1 / 9</span> &nbsp;·&nbsp; Arrow keys</div>
+<script>
+const slides = Array.from(document.querySelectorAll(".slide"));
+let index = 0;
+function show(next) {
+  index = (next + slides.length) % slides.length;
+  slides.forEach((slide, i) => slide.classList.toggle("active", i === index));
+  document.getElementById("count").textContent = (index + 1) + " / " + slides.length;
+}
+function fit() {
+  const scale = Math.min(window.innerWidth / 1600, window.innerHeight / 900);
+  slides.forEach((slide) => {
+    slide.style.transform = "translate(-50%, -50%) scale(" + scale + ")";
+  });
+}
+document.addEventListener("keydown", (event) => {
+  if (event.key === "ArrowRight" || event.key === " " || event.key === "PageDown") show(index + 1);
+  if (event.key === "ArrowLeft" || event.key === "PageUp") show(index - 1);
+  if (event.key === "Home") show(0);
+  if (event.key === "End") show(slides.length - 1);
+});
+document.addEventListener("click", (event) => {
+  if (event.target.closest(".hint")) return;
+  show(event.clientX < window.innerWidth / 2 ? index - 1 : index + 1);
+});
+window.addEventListener("resize", fit);
+fit();
+</script>
+</body>
+</html>
