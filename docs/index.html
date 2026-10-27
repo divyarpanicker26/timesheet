@@ -351,12 +351,15 @@ function queuePage(user) {
   const sheets = db.sheets.filter((sheet) => sheet.status !== "draft").slice().sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9) || b.id - a.id);
   const rows = sheets.map((sheet) => {
     const pattern = review(sheet).length ? "Needs correction" : "Matches";
-    return "<tr><td>" + esc(sheet.employee_name) + "</td><td>" + esc(formatDate(sheet.form_date)) + "</td><td>" + pattern + "</td><td>" + statusBadge(sheet.status) + "</td><td><button type='button' data-go='#/sheet/" + sheet.id + "'>Review</button> · <button type='button' data-print='" + sheet.id + "'>Download PDF</button></td></tr>";
+    const sign = sheet.status === "submitted" && sheet.supervisor_sign_method !== "digital"
+      ? " · <button type='button' class='sign-btn' data-go='#/sheet/" + sheet.id + "/sign'>Sign</button>"
+      : "";
+    return "<tr><td>" + esc(sheet.employee_name) + "</td><td>" + esc(formatDate(sheet.form_date)) + "</td><td>" + pattern + "</td><td>" + statusBadge(sheet.status) + "</td><td><button type='button' data-go='#/sheet/" + sheet.id + "'>Review</button>" + sign + " · <button type='button' data-print='" + sheet.id + "'>Download PDF</button></td></tr>";
   }).join("");
   const table = sheets.length
     ? "<table class='list'><thead><tr><th>Employee</th><th>Form date</th><th>Pattern</th><th>Status</th><th></th></tr></thead><tbody>" + rows + "</tbody></table>"
     : "<p class='muted'>No time sheets have been submitted.</p>";
-  return page(user, "<h1>Supervisor queue</h1><p class='muted'>Open a sheet to review the hours and approve it.</p>" + table);
+  return page(user, "<h1>Supervisor queue</h1><p class='muted'>Open a sheet to review the hours. Sign opens the digital signature page and approves that sheet.</p>" + table);
 }
 function choices(selected) {
   return PERMS.map(([key, label]) => "<label class='choice'><input type='checkbox' name='perm_" + key + "' value='yes'" + (selected.includes(key) ? " checked" : "") + "> " + esc(label) + "</label>").join("");
@@ -381,7 +384,8 @@ function detailPage(user, record, error) {
   } else if (can(user, "submit") && record.employee_id === user.id && record.status === "returned") {
     controls = "<p class='no-print'><button class='primary' type='button' data-go='#/sheet/" + record.id + "/edit'>Edit and submit again</button></p>";
   }
-  return page(user, "<div class='paper'><p class='no-print'>" + statusBadge(record.status) + " <button class='primary' type='button' id='print-sheet'>Download PDF</button></p>" + note + patternBox(issues) + paperBlock(record, false, signHref) + controls + "</div>");
+  const signTop = signHref ? "<button type='button' class='sign-btn' data-go='" + signHref + "'>Sign</button> " : "";
+  return page(user, "<div class='paper'><p class='no-print'>" + statusBadge(record.status) + " " + signTop + "<button class='primary' type='button' id='print-sheet'>Download PDF</button></p>" + note + patternBox(issues) + paperBlock(record, false, signHref) + controls + "</div>");
 }
 function readWeeks(form) {
   const weeks = blankWeeks();
@@ -496,7 +500,7 @@ document.getElementById("app").addEventListener("submit", (event) => {
   if (form.dataset.user) updateUser(user, form);
 });
 function saveSheet(user, form, submitter) {
-  const action = submitter && submitter.value === "rebuild" ? "rebuild" : "submit";
+  const action = submitter && submitter.value ? submitter.value : "submit";
   const existing = form.dataset.id ? findSheet(form.dataset.id) : null;
   const errors = [];
   const formDateText = valueOf(form, "form_date");

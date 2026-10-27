@@ -662,13 +662,16 @@ def queue_page(user: dict, sheets: list[dict]) -> str:
             pattern = "Needs correction" if issues else "Matches"
         except (ValueError, KeyError):
             pattern = "Needs correction"
+        sign = ""
+        if sheet["status"] == "submitted" and sheet.get("supervisor_sign_method") != "digital":
+            sign = f" · <a class='sign-btn' href='/sheet/{sheet['id']}/sign'>Sign</a>"
         rows.append(
             "<tr>"
             f"<td>{esc(sheet['employee_name'])}</td>"
             f"<td>{esc(format_date(date.fromisoformat(sheet['form_date'])))}</td>"
             f"<td>{esc(pattern)}</td>"
             f"<td>{status_badge(sheet['status'])}</td>"
-            f"<td><a href='/sheet/{sheet['id']}'>Review</a> · <a href='/sheet/{sheet['id']}/pdf'>Download PDF</a></td>"
+            f"<td><a href='/sheet/{sheet['id']}'>Review</a>{sign} · <a href='/sheet/{sheet['id']}/pdf'>Download PDF</a></td>"
             "</tr>"
         )
     table = (
@@ -678,7 +681,7 @@ def queue_page(user: dict, sheets: list[dict]) -> str:
         if rows
         else "<p class='muted'>No time sheets have been submitted.</p>"
     )
-    body = f"<h1>Supervisor queue</h1><p class='muted'>Open a sheet to review the hours and approve it.</p>{table}"
+    body = f"<h1>Supervisor queue</h1><p class='muted'>Open a sheet to review the hours. Sign opens the digital signature page and approves that sheet.</p>{table}"
     return render_page("Supervisor queue", body, user)
 
 
@@ -888,9 +891,10 @@ def detail_page(user: dict, record: dict, csrf: str, error: str = "") -> str:
         """
     elif can(user, "submit") and record["employee_id"] == user["id"] and record["status"] == "returned":
         controls = f"<p class='no-print'><a class='button' href='/sheet/{record['id']}/edit'>Edit and submit again</a></p>"
+    sign_top = f"<a class='sign-btn' href='{esc(sign_href)}'>Sign</a> " if sign_href else ""
     body = f"""
     <div class="paper">
-      <p class="no-print">{status_badge(record['status'])} <a class="button" href="/sheet/{record['id']}/pdf">Download PDF</a></p>
+      <p class="no-print">{status_badge(record['status'])} {sign_top}<a class="button" href="/sheet/{record['id']}/pdf">Download PDF</a></p>
       {note}
       <div class="no-print">{pattern_box(issues)}</div>
       {paper_block(record, False, sign_href)}
